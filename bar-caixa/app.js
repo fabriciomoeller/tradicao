@@ -78,6 +78,13 @@ const DB = {
         UI.toast('Servidor offline — salvando localmente', 'warning');
       }
     }
+  },
+
+  // Garante envio imediato ao fechar/recarregar a página (evita perda por debounce)
+  flushSync() {
+    clearTimeout(this._syncTimer);
+    const blob = new Blob([JSON.stringify(this.get())], { type: 'application/json' });
+    navigator.sendBeacon('/api/state', blob);
   }
 };
 
@@ -1096,4 +1103,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   Sales._renderCart();
   UI.renderPDVGrid();
   UI.showTab('fichas');
+
+  // Garante que o estado (incluindo ranks) seja persistido antes de fechar/recarregar
+  window.addEventListener('beforeunload', () => DB.flushSync());
 });
