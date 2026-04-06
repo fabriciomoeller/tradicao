@@ -685,6 +685,8 @@ const UI = {
   // ── PDV ──
   renderPDVGrid() {
     const grid = document.getElementById('product-grid');
+    const filterInput = document.getElementById('pdv-filter');
+    const query = filterInput ? filterInput.value.trim().toLowerCase() : '';
     const prods = Products.all();
     if (prods.length === 0) {
       grid.innerHTML = `<div class="empty-state" style="grid-column:1/-1">
@@ -693,8 +695,17 @@ const UI = {
       </div>`;
       return;
     }
+    const filtered = query
+      ? prods.filter(p =>
+          p.name.toLowerCase().includes(query) ||
+          (p.category || '').toLowerCase().includes(query))
+      : prods;
+    if (filtered.length === 0) {
+      grid.innerHTML = `<div class="empty-state" style="grid-column:1/-1"><span class="es-icon">🔍</span>Nenhum produto encontrado para "<strong>${esc(query)}</strong>".</div>`;
+      return;
+    }
     // Sort: rank primeiro, depois in-stock, depois nome
-    const sorted = [...prods].sort((a, b) => {
+    const sorted = [...filtered].sort((a, b) => {
       if ((a.stock > 0) !== (b.stock > 0)) return a.stock > 0 ? -1 : 1;
       const ra = a.rank ?? 999, rb = b.rank ?? 999;
       if (ra !== rb) return ra - rb;

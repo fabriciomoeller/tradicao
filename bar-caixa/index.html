@@ -52,6 +52,9 @@
 
     <!-- PDV -->
     <section id="tab-pdv" class="tab-content">
+      <div class="produtos-filter-bar">
+        <input id="pdv-filter" type="text" placeholder="Filtrar por nome ou categoria…" oninput="UI.renderPDVGrid()" autocomplete="off">
+      </div>
       <div class="pdv-layout">
         <div class="product-grid" id="product-grid"></div>
         <div class="cart-panel">

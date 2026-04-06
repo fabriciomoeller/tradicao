@@ -44,6 +44,7 @@ bar-caixa/
 ### 🛒 PDV
 - Grade de produtos com foto (ou emoji da categoria, quando sem foto)
 - Borda colorida por produto/categoria
+- **Filtro por nome ou categoria**: campo de busca acima da grade, filtra em tempo real
 - Carrinho com botões de `+` e `−` dimensionados para touch
 - Controle de estoque em tempo real (impede vender além do disponível)
 - Confirmação de venda atualiza estoque e sincroniza SQLite imediatamente
