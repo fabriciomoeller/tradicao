@@ -667,15 +667,20 @@ const Charts = {
 
     const labels    = products.map(p => p.name.length > 22 ? p.name.slice(0, 20) + '…' : p.name);
     const sold      = products.map(p => p.soldQty || 0);
-    const remaining = products.map(p => Math.max(0, (p.initialStock || 0) - (p.soldQty || 0)));
+    const remaining = products.map(p => Math.max(0, p.stock || 0));
+    const revenue   = products.map(p => +((p.soldQty || 0) * Math.max(0, (p.price || 0) - (p.costPrice || 0))).toFixed(2));
 
     this._inst = new Chart(canvas.getContext('2d'), {
       type: 'bar',
       data: {
         labels,
         datasets: [
-          { label: 'Vendido',    data: sold,      backgroundColor: 'rgba(239,68,68,0.8)',  borderColor: 'rgba(239,68,68,1)',  borderWidth: 1 },
-          { label: 'Disponível', data: remaining, backgroundColor: 'rgba(34,197,94,0.5)',  borderColor: 'rgba(34,197,94,0.8)', borderWidth: 1 }
+          { label: 'Vendido',          data: sold,    backgroundColor: 'rgba(239,68,68,0.8)', borderColor: 'rgba(239,68,68,1)',   borderWidth: 1, stack: 'qty', yAxisID: 'y' },
+          { label: 'Disponível',       data: remaining, backgroundColor: 'rgba(34,197,94,0.5)', borderColor: 'rgba(34,197,94,0.8)', borderWidth: 1, stack: 'qty', yAxisID: 'y' },
+          { label: 'Lucro (R$)', data: revenue, type: 'line', yAxisID: 'y2',
+            borderColor: 'rgba(251,191,36,0.9)', backgroundColor: 'rgba(251,191,36,0.15)',
+            pointBackgroundColor: 'rgba(251,191,36,1)', pointRadius: 3, pointHoverRadius: 5,
+            borderWidth: 2, tension: 0.3, fill: false }
         ]
       },
       options: {
@@ -683,18 +688,26 @@ const Charts = {
         maintainAspectRatio: false,
         scales: {
           x: { stacked: true, ticks: { color: '#8888aa', font: { size: 11 }, maxRotation: 45 }, grid: { color: 'rgba(45,45,78,0.7)' } },
-          y: { stacked: true, ticks: { color: '#8888aa' }, grid: { color: 'rgba(45,45,78,0.7)' }, beginAtZero: true }
+          y:  { stacked: true, position: 'left',  ticks: { color: '#8888aa' }, grid: { color: 'rgba(45,45,78,0.7)' }, beginAtZero: true, title: { display: true, text: 'Unidades', color: '#8888aa' } },
+          y2: { position: 'right', beginAtZero: true, grid: { drawOnChartArea: false },
+                ticks: { color: 'rgba(251,191,36,0.8)', callback: v => 'R$\u00a0' + v.toLocaleString('pt-BR', { minimumFractionDigits: 0 }) },
+                title: { display: true, text: 'Lucro (R$)', color: 'rgba(251,191,36,0.8)' } }
         },
         plugins: {
           legend: { labels: { color: '#e8e8f0' } },
           tooltip: {
             callbacks: {
-              label(ctx) { return ` ${ctx.dataset.label}: ${ctx.parsed.y} un`; },
+              label(ctx) {
+                if (ctx.dataset.label === 'Lucro (R$)') return ` Receita: R$ ${ctx.parsed.y.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`;
+                return ` ${ctx.dataset.label}: ${ctx.parsed.y} un`;
+              },
               footer(items) {
-                const total  = items.reduce((s, i) => s + i.parsed.y, 0);
-                const soldIt = items.find(i => i.dataset.label === 'Vendido');
-                if (!soldIt || total === 0) return '';
-                return `${((soldIt.parsed.y / total) * 100).toFixed(0)}% vendido`;
+                const idx = items[0].dataIndex;
+                const s = sold[idx] || 0;
+                const r = remaining[idx] || 0;
+                const total = s + r;
+                if (total === 0) return '';
+                return `${((s / total) * 100).toFixed(0)}% vendido`;
               }
             }
           }
@@ -770,10 +783,83 @@ const UI = {
   },
 
   // ── PRODUTOS ──
+  _selectedCats: null, // null = todas
+  _prodSort: { col: 'name', dir: 1 }, // col: chave, dir: 1 asc / -1 desc
+
+  toggleCatDropdown() {
+    const dd = document.getElementById('cat-multiselect-dropdown');
+    if (!dd) return;
+    if (dd.classList.contains('hidden')) {
+      this._buildCatOptions();
+      dd.classList.remove('hidden');
+    } else {
+      dd.classList.add('hidden');
+    }
+  },
+
+  _buildCatOptions() {
+    const list = document.getElementById('cat-options-list');
+    if (!list) return;
+    const cats = Categories.all();
+    const sel = this._selectedCats;
+    list.innerHTML = cats.map(c => `
+      <label class="multiselect-option">
+        <input type="checkbox" value="${esc(c.name)}"
+          ${!sel || sel.has(c.name) ? 'checked' : ''}
+          onchange="UI._onCatCheck()">
+        <span class="cat-badge" style="--cat-color:${c.color}">${c.icon} ${esc(c.name)}</span>
+      </label>`).join('');
+    const allChk = document.getElementById('cat-check-all');
+    if (allChk) allChk.checked = !sel;
+  },
+
+  toggleAllCats(checked) {
+    this._selectedCats = checked ? null : new Set();
+    this._buildCatOptions();
+    this._updateCatLabel();
+    this.renderProductList();
+  },
+
+  _onCatCheck() {
+    const checkboxes = document.querySelectorAll('#cat-options-list input[type=checkbox]');
+    const checked = [...checkboxes].filter(cb => cb.checked).map(cb => cb.value);
+    const allChk = document.getElementById('cat-check-all');
+    if (checked.length === checkboxes.length) {
+      this._selectedCats = null;
+      if (allChk) allChk.checked = true;
+    } else {
+      this._selectedCats = new Set(checked);
+      if (allChk) allChk.checked = false;
+    }
+    this._updateCatLabel();
+    this.renderProductList();
+  },
+
+  _updateCatLabel() {
+    const lbl = document.getElementById('cat-multiselect-label');
+    if (!lbl) return;
+    if (!this._selectedCats) {
+      lbl.textContent = 'Todas as categorias';
+    } else if (this._selectedCats.size === 0) {
+      lbl.textContent = 'Nenhuma categoria';
+    } else if (this._selectedCats.size === 1) {
+      lbl.textContent = [...this._selectedCats][0];
+    } else {
+      lbl.textContent = `${this._selectedCats.size} categorias`;
+    }
+  },
+
+  _sortProd(col) {
+    if (this._prodSort.col === col) {
+      this._prodSort.dir *= -1;
+    } else {
+      this._prodSort = { col, dir: 1 };
+    }
+    this.renderProductList();
+  },
+
   renderProductList() {
     const el = document.getElementById('produtos-list');
-    const filterInput = document.getElementById('produtos-filter');
-    const query = filterInput ? filterInput.value.trim().toLowerCase() : '';
     const prods = Products.all();
     if (prods.length === 0) {
       el.innerHTML = `<div class="empty-state">
@@ -781,20 +867,42 @@ const UI = {
       </div>`;
       return;
     }
-    const filtered = query
-      ? prods.filter(p =>
-          p.name.toLowerCase().includes(query) ||
-          (p.category || '').toLowerCase().includes(query))
-      : prods;
+    const query = (document.getElementById('produtos-filter')?.value || '').trim().toLowerCase();
+    const sel = this._selectedCats;
+    const filtered = prods.filter(p => {
+      if (sel && !sel.has(p.category || '')) return false;
+      if (query && !p.name.toLowerCase().includes(query)) return false;
+      return true;
+    });
     if (filtered.length === 0) {
-      el.innerHTML = `<div class="empty-state"><span class="es-icon">🔍</span>Nenhum produto encontrado para "<strong>${esc(query)}</strong>".</div>`;
+      el.innerHTML = `<div class="empty-state"><span class="es-icon">🔍</span>Nenhum produto encontrado para as categorias selecionadas.</div>`;
       return;
     }
-    const sorted = [...filtered].sort((a, b) => a.name.localeCompare(b.name));
+    const { col, dir } = this._prodSort;
+    const sorted = [...filtered].sort((a, b) => {
+      let av, bv;
+      if (col === 'name')      { av = a.name || '';               bv = b.name || '';               return dir * av.localeCompare(bv); }
+      if (col === 'category')  { av = a.category || '';           bv = b.category || '';           return dir * av.localeCompare(bv); }
+      if (col === 'costPrice') { av = a.costPrice || 0;           bv = b.costPrice || 0; }
+      if (col === 'price')     { av = a.price || 0;               bv = b.price || 0; }
+      if (col === 'stock')     { av = a.stock ?? 0;               bv = b.stock ?? 0; }
+      if (col === 'soldQty')   { av = a.soldQty || 0;             bv = b.soldQty || 0; }
+      if (col === 'rank')      { av = a.rank ?? 999;              bv = b.rank ?? 999; }
+      return dir * (av - bv);
+    });
+
+    const th = (label, key) => {
+      const active = col === key;
+      const arrow  = active ? (dir === 1 ? ' ▲' : ' ▼') : '';
+      return `<th class="sortable-th${active ? ' sort-active' : ''}" onclick="UI._sortProd('${key}')">${label}${arrow}</th>`;
+    };
+
     el.innerHTML = `<table class="data-table">
       <thead><tr>
-        <th>#</th><th>Produto</th><th>Categoria</th><th>Compra (unit.)</th><th>Venda (unit.)</th>
-        <th>Estoque</th><th>Vendido</th><th>Status</th><th>Ações</th>
+        ${th('#','rank')}${th('Produto','name')}${th('Categoria','category')}
+        ${th('Compra','costPrice')}${th('Venda','price')}
+        ${th('Estoque','stock')}${th('Vendido','soldQty')}
+        <th>Status</th><th>Ações</th>
       </tr></thead>
       <tbody>
         ${sorted.map(p => {
@@ -1256,6 +1364,13 @@ document.addEventListener('DOMContentLoaded', async () => {
   Sales._renderCart();
   UI.renderPDVGrid();
   UI.showTab('fichas');
+
+  // Fecha dropdown de categorias ao clicar fora
+  document.addEventListener('click', e => {
+    const wrap = document.getElementById('cat-multiselect-wrap');
+    const dd   = document.getElementById('cat-multiselect-dropdown');
+    if (wrap && dd && !wrap.contains(e.target)) dd.classList.add('hidden');
+  });
 
   // Garante que o estado (incluindo ranks) seja persistido antes de fechar/recarregar
   window.addEventListener('beforeunload', () => DB.flushSync());

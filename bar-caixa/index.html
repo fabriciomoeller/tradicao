@@ -81,7 +81,19 @@
         </div>
       </div>
       <div class="produtos-filter-bar">
-        <input id="produtos-filter" type="text" placeholder="Filtrar por nome ou categoria…" oninput="UI.renderProductList()" autocomplete="off">
+        <input id="produtos-filter" type="text" placeholder="Filtrar por nome…" oninput="UI.renderProductList()" autocomplete="off">
+        <div class="multiselect-wrap" id="cat-multiselect-wrap">
+          <button type="button" class="multiselect-toggle" id="cat-multiselect-btn" onclick="UI.toggleCatDropdown()">
+            <span id="cat-multiselect-label">Todas as categorias</span>
+            <span class="multiselect-arrow">▾</span>
+          </button>
+          <div class="multiselect-dropdown hidden" id="cat-multiselect-dropdown">
+            <label class="multiselect-option multiselect-all">
+              <input type="checkbox" id="cat-check-all" onchange="UI.toggleAllCats(this.checked)"> Todas
+            </label>
+            <div id="cat-options-list"></div>
+          </div>
+        </div>
       </div>
       <div id="produtos-list"></div>
     </section>

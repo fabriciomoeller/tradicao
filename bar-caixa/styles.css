@@ -316,10 +316,15 @@ h2 { font-size: 1.2rem; margin-bottom: 0.75rem; }
 
 .produtos-filter-bar {
   margin-bottom: 1rem;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
 }
-.produtos-filter-bar input {
-  width: 100%;
-  max-width: 360px;
+.produtos-filter-bar input[type=text] {
+  flex: 1;
+  min-width: 160px;
+  max-width: 300px;
   padding: 0.5rem 0.75rem;
   border: 1px solid var(--border);
   border-radius: 6px;
@@ -329,8 +334,79 @@ h2 { font-size: 1.2rem; margin-bottom: 0.75rem; }
   outline: none;
   box-sizing: border-box;
 }
-.produtos-filter-bar input:focus {
+.produtos-filter-bar input[type=text]:focus {
   border-color: var(--primary);
+}
+
+/* ── Combobox multi-seleção de categorias ── */
+.multiselect-wrap {
+  position: relative;
+  display: inline-block;
+  min-width: 220px;
+  max-width: 360px;
+}
+.multiselect-toggle {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 0.95rem;
+  background: var(--surface);
+  color: var(--text);
+  cursor: pointer;
+  text-align: left;
+}
+.multiselect-toggle:focus {
+  outline: 2px solid var(--primary);
+  outline-offset: 1px;
+}
+.multiselect-arrow {
+  font-size: 0.8rem;
+  opacity: 0.6;
+  flex-shrink: 0;
+}
+.multiselect-dropdown {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  min-width: 100%;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 6px 20px rgba(0,0,0,0.25);
+  z-index: 200;
+  max-height: 300px;
+  overflow-y: auto;
+  padding: 0.4rem 0;
+}
+.multiselect-dropdown.hidden { display: none; }
+.multiselect-option {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.45rem 0.9rem;
+  cursor: pointer;
+  font-size: 0.9rem;
+  user-select: none;
+  white-space: nowrap;
+}
+.multiselect-option:hover { background: rgba(255,255,255,0.06); }
+.multiselect-all {
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 0.25rem;
+  padding-bottom: 0.55rem;
+  font-weight: 600;
+}
+.multiselect-option input[type=checkbox] {
+  accent-color: var(--primary);
+  width: 15px;
+  height: 15px;
+  flex-shrink: 0;
+  cursor: pointer;
 }
 
 .btn-primary {
@@ -383,6 +459,13 @@ table.data-table {
 }
 .data-table tr:last-child td { border-bottom: none; }
 .data-table tbody tr:hover td { background: rgba(255,255,255,0.02); }
+.sortable-th {
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+}
+.sortable-th:hover { color: var(--text); }
+.sort-active { color: var(--primary) !important; }
 
 .badge {
   display: inline-block;
