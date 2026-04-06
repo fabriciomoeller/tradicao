@@ -613,6 +613,116 @@ const Reports = {
       }).join('');
   },
 
+  exportMarkdown() {
+    const data   = DB.get();
+    const s      = Reports.summary(data);
+    const store  = data.settings?.storeName || 'Bar';
+    const now    = new Date();
+    const openedAt = new Date(data.cashRegister.openedAt);
+    const fmtDate  = d => d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' });
+    const fmtTime  = d => d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+    const fmtMD    = v => `R$ ${v.toFixed(2).replace('.', ',')}`;
+    const pct      = (n, d) => d === 0 ? '—' : (n / d * 100).toFixed(1) + '%';
+
+    const accumulatedProfit = data.cashRegister.accumulatedProfit || 0;
+    const totalProfit       = s.totalProfit + accumulatedProfit;
+
+    // ── Produtos agrupados por categoria ──
+    const cats = {};
+    Object.entries(s.byProduct).forEach(([name, v]) => {
+      const cat = v.category || 'Outro';
+      if (!cats[cat]) cats[cat] = [];
+      cats[cat].push({ name, ...v, profit: v.total - v.cost });
+    });
+
+    let salesSection = '';
+    Object.entries(cats)
+      .sort((a, b) => b[1].reduce((s,i)=>s+i.total,0) - a[1].reduce((s,i)=>s+i.total,0))
+      .forEach(([cat, items]) => {
+        const catTotal   = items.reduce((s,i)=>s+i.total, 0);
+        const catProfit  = items.reduce((s,i)=>s+i.profit, 0);
+        salesSection += `\n### ${cat}\n\n`;
+        salesSection += `| Produto | Qtd | Receita | Custo | Lucro | Margem |\n`;
+        salesSection += `|---------|----:|--------:|------:|------:|-------:|\n`;
+        items.sort((a,b)=>b.total-a.total).forEach(i => {
+          salesSection += `| ${i.name} | ${i.qty} | ${fmtMD(i.total)} | ${fmtMD(i.cost)} | ${fmtMD(i.profit)} | ${pct(i.profit, i.total)} |\n`;
+        });
+        salesSection += `| **Total ${cat}** | | **${fmtMD(catTotal)}** | | **${fmtMD(catProfit)}** | **${pct(catProfit, catTotal)}** |\n`;
+      });
+
+    if (!salesSection) salesSection = '\n_Nenhuma venda registrada nesta sessão._\n';
+
+    // ── Estoque ──
+    const prods = Products.all().sort((a,b) => (a.category||'').localeCompare(b.category||'')||a.name.localeCompare(b.name));
+    let stockSection = `| Produto | Categoria | Estoque Inicial | Vendido | Estoque Final | Status |\n`;
+    stockSection    += `|---------|-----------|----------------:|--------:|--------------:|--------|\n`;
+    prods.forEach(p => {
+      const initial = p.initialStock ?? p.stock;
+      const status  = p.stock <= 0 ? '⚠ Esgotado' : p.stock <= 3 ? '🔶 Baixo' : '✅ OK';
+      stockSection += `| ${p.name} | ${p.category || '-'} | ${initial} | ${p.soldQty || 0} | ${p.stock} | ${status} |\n`;
+    });
+
+    // ── Catálogo de preços ──
+    let catalogSection = `| Produto | Categoria | Custo | Preço de Venda | Margem |\n`;
+    catalogSection    += `|---------|-----------|------:|---------------:|-------:|\n`;
+    prods.forEach(p => {
+      const margin = p.costPrice ? pct(p.price - p.costPrice, p.price) : '—';
+      catalogSection += `| ${p.name} | ${p.category || '-'} | ${p.costPrice ? fmtMD(p.costPrice) : '—'} | ${fmtMD(p.price)} | ${margin} |\n`;
+    });
+
+    const md = `# Relatório de Evento — ${store}
+
+**Data:** ${fmtDate(now)}
+**Período:** ${fmtDate(openedAt)} ${fmtTime(openedAt)} → ${fmtDate(now)} ${fmtTime(now)}
+**Gerado em:** ${now.toLocaleString('pt-BR')}
+
+---
+
+## 1. Resumo Financeiro
+
+| | Valor |
+|---|---:|
+| Fichas vendidas — PIX | ${fmtMD(s.totalPix)} |
+| Fichas vendidas — Dinheiro | ${fmtMD(s.totalCash)} |
+| **Total fichas** | **${fmtMD(s.totalTokens)}** |
+| Receita produtos | ${fmtMD(s.totalSales)} |
+| Custo produtos | ${fmtMD(s.totalCost)} |
+| **Lucro sessão atual** | **${fmtMD(s.totalProfit)}** |
+| Lucro acumulado (fechamentos anteriores) | ${fmtMD(accumulatedProfit)} |
+| **Lucro total do evento** | **${fmtMD(totalProfit)}** |
+| Margem geral | ${pct(s.totalProfit, s.totalSales)} |
+| Pedidos | ${s.salesCount} |
+| Itens vendidos | ${s.totalItems} |
+
+---
+
+## 2. Vendas por Categoria e Produto
+${salesSection}
+---
+
+## 3. Posição de Estoque
+
+${stockSection}
+---
+
+## 4. Catálogo de Preços
+
+${catalogSection}
+---
+
+_Relatório gerado pelo sistema Bar Caixa — ${store}_
+`;
+
+    const blob = new Blob([md], { type: 'text/markdown;charset=utf-8' });
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement('a');
+    a.href     = url;
+    a.download = `relatorio-${store.toLowerCase().replace(/\s+/g,'-')}-${now.toISOString().slice(0,10)}.md`;
+    a.click();
+    URL.revokeObjectURL(url);
+    UI.toast('Relatório exportado!', 'success');
+  },
+
   _reportHTML(report) {
     const s = report.summary;
     const prodRows = this._prodRowsByCategory(s.byProduct, 'Nenhuma venda.');
