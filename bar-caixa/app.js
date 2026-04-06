@@ -538,9 +538,12 @@ const Reports = {
     const totalSales  = sl.reduce((s, t) => s + t.total, 0);
     const totalItems  = sl.reduce((s, t) => s + t.items.reduce((si, i) => si + i.qty, 0), 0);
 
+    const prodMap = {};
+    data.products.forEach(p => { prodMap[p.id] = p.category || 'Outro'; });
+
     const byProduct = {};
     sl.forEach(sale => sale.items.forEach(i => {
-      if (!byProduct[i.name]) byProduct[i.name] = { qty: 0, total: 0 };
+      if (!byProduct[i.name]) byProduct[i.name] = { qty: 0, total: 0, category: prodMap[i.pid] || i.category || 'Outro' };
       byProduct[i.name].qty   += i.qty;
       byProduct[i.name].total += i.price * i.qty;
     }));
@@ -567,15 +570,41 @@ const Reports = {
     UI.showModal(this._reportHTML(report));
   },
 
+  _prodRowsByCategory(byProduct, emptyMsg = 'Nenhuma venda.') {
+    const entries = Object.entries(byProduct);
+    if (!entries.length) return `<p style="color:var(--muted);font-size:0.875rem;padding:0.5rem 0">${emptyMsg}</p>`;
+
+    // agrupar por categoria
+    const cats = {};
+    entries.forEach(([name, v]) => {
+      const cat = v.category || 'Outro';
+      if (!cats[cat]) cats[cat] = { total: 0, items: [] };
+      cats[cat].total += v.total;
+      cats[cat].items.push([name, v]);
+    });
+
+    return Object.entries(cats)
+      .sort((a, b) => b[1].total - a[1].total)
+      .map(([cat, g]) => {
+        const rows = g.items
+          .sort((a, b) => b[1].total - a[1].total)
+          .map(([name, v]) => `
+            <div style="display:flex;justify-content:space-between;padding:0.3rem 0 0.3rem 0.75rem;font-size:0.85rem;color:var(--muted)">
+              <span>${esc(name)}</span>
+              <span>${v.qty}× &nbsp;<span style="font-weight:600;color:var(--text)">${fmt(v.total)}</span></span>
+            </div>`).join('');
+        return `
+          <div style="display:flex;justify-content:space-between;align-items:center;padding:0.55rem 0;border-top:1px solid var(--border);margin-top:0.25rem">
+            <strong style="font-size:0.92rem;color:var(--text);text-transform:uppercase;letter-spacing:0.04em">${esc(cat)}</strong>
+            <strong style="font-weight:700;color:var(--success);font-size:0.95rem">${fmt(g.total)}</strong>
+          </div>
+          ${rows}`;
+      }).join('');
+  },
+
   _reportHTML(report) {
     const s = report.summary;
-    const prodRows = Object.entries(s.byProduct)
-      .sort((a, b) => b[1].total - a[1].total)
-      .map(([name, v]) => `
-        <div class="report-row">
-          <span>${esc(name)}</span>
-          <span>${v.qty}× &nbsp;<span class="rr-value">${fmt(v.total)}</span></span>
-        </div>`).join('') || '<p style="color:var(--muted);font-size:0.875rem">Nenhuma venda.</p>';
+    const prodRows = this._prodRowsByCategory(s.byProduct, 'Nenhuma venda.');
 
     const d1 = new Date(report.openedAt).toLocaleString('pt-BR');
     const d2 = new Date(report.closedAt).toLocaleString('pt-BR');
@@ -791,13 +820,7 @@ const UI = {
     const openedAt = new Date(data.cashRegister.openedAt);
     const el = document.getElementById('caixa-summary');
 
-    const prodRows = Object.entries(s.byProduct)
-      .sort((a, b) => b[1].total - a[1].total)
-      .map(([name, v]) => `
-        <div class="report-row">
-          <span>${esc(name)}</span>
-          <span>${v.qty}× &nbsp;<span class="rr-value">${fmt(v.total)}</span></span>
-        </div>`).join('') || '<p style="color:var(--muted);font-size:0.875rem;padding:0.5rem 0">Nenhuma venda neste período.</p>';
+    const prodRows = Reports._prodRowsByCategory(s.byProduct, 'Nenhuma venda neste período.');
 
     el.innerHTML = `
       <p style="color:var(--muted);font-size:0.82rem;margin-bottom:1rem">
