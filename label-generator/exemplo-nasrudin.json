@@ -1,0 +1,40 @@
+{
+  "labelWidth": "7",
+  "labelHeight": "3.5",
+  "marginTop": "1",
+  "marginBottom": "1",
+  "marginLeft": "0",
+  "marginRight": "0",
+  "backgroundOpacity": "0.8",
+  "backgroundZoom": "100",
+  "fontSize": "18",
+  "fontFamily": "Arial",
+  "textColor": "#1a1a1a",
+  "customText": "Histórias de Nasrudin",
+  "tickets": [
+    {
+      "value": 1,
+      "quantity": 50
+    },
+    {
+      "value": 2,
+      "quantity": 50
+    },
+    {
+      "value": 5,
+      "quantity": 50
+    },
+    {
+      "value": 10,
+      "quantity": 50
+    },
+    {
+      "value": 20,
+      "quantity": 30
+    },
+    {
+      "value": 50,
+      "quantity": 15
+    }
+  ]
+}

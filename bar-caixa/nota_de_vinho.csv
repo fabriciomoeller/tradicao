@@ -1,0 +1,42 @@
+50;80;vinho pata negra oro
+50;80;vinho pata negra oro
+50;80;vinho pata negra oro
+50;80;Vinho Chileno Estampa Ruta 90 Reserva Cabernet Sauvignon
+50;80;Vinho Chileno Estampa Ruta 90 Reserva Cabernet Sauvignon
+40;60;Montgras estate rose
+;;
+80;130;D.V. Catena Cabernet-Malbec
+60;100;Trivento Reserva Malbec
+70;110;Perez Cruz Gran Reserva Cabernet Sauvignon
+70;110;La Linda Malbec
+70;110;Tarapacá Reserva Merlot
+60;100;Montgras Gran Reserva Cabernet Sauvignon
+;;
+40;60;benjamin cabernet sauvignon
+60;90;vinho tinto argentino sottano reserva cabernet sauvignon 750ml
+50;80;vinho Tinto Uruguaio Cóm plice Reserva Tannat
+50;80;Vinho Chileno De Martino Parcela #37 Cabernet Sauvignon Maipo D.O
+40;60;Vinho Tinto Chileno Faro Reserva Carmenere
+60;90;ventisquero reserva rosé
+50;80;Vinho Tolva Reserva Carmenére
+50;80;Vinho Tolva Reserva Carmenére
+40;60;Vinho Branco Argentino Torreon Blend
+;;
+50;80;La escondida reserva malbec
+50;80;Vinho Devil's Carnaval Spectacular Cabernet Casillero Del Diablo
+50;80;Vinho Tinto Chileno Casillero Del Diablo Merlot
+50;80;vinho tinto chileno tripantu gran reserva cabernet sauvignon
+50;80;vinho tinto chileno tripantu gran reserva carmenere
+40;60;vinho tinto chileno 8pasos reserva carmenere 750ml
+Observações rápidas;;
+Mantive duplicados exatamente como no documento.;;
+Corrigi levemente leitura onde havia ambiguidade visual (ex: “Cóm plice” pode ser “Cúmplice”; posso revisar se quiser precisão total).;
+Ignorei os subtotais (290,00 / 460,00 etc.). Posso incluí-los como linhas ou em outro CSV.;;
+;;
+Se quiser, posso:;;
+;;
+Padronizar nomes dos produtos (útil para cadastro);;
+Converter vírgula decimal → ponto (para sistemas);;
+Adicionar SKU/código automático;;
+;;
+Só me diga o formato final que você precisa.;;

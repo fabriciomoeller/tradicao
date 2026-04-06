@@ -1,0 +1,597 @@
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+  background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+  color: #333;
+  line-height: 1.6;
+  min-height: 100vh;
+}
+
+.container {
+  max-width: 1400px;
+  margin: 0 auto;
+  padding: 20px;
+}
+
+/* Header Styles */
+header {
+  text-align: center;
+  margin-bottom: 30px;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  padding: 30px;
+  border-radius: 15px;
+  box-shadow: 0 10px 30px rgba(102, 126, 234, 0.3);
+  position: relative;
+  overflow: hidden;
+}
+
+
+header h1 {
+  font-size: 2.5rem;
+  margin-bottom: 10px;
+  font-weight: 700;
+  text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.3);
+  position: relative;
+  z-index: 1;
+}
+
+header p {
+  font-size: 1.1rem;
+  opacity: 0.9;
+  position: relative;
+  z-index: 1;
+}
+
+/* Main Content Layout */
+.main-content {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 30px;
+  margin-bottom: 30px;
+}
+
+/* Controls Panel */
+.controls-panel {
+  background: white;
+  padding: 30px;
+  border-radius: 15px;
+  box-shadow: 0 8px 25px rgba(0, 0, 0, 0.1);
+  border: 1px solid rgba(102, 126, 234, 0.1);
+}
+
+.controls-panel h2 {
+  color: #667eea;
+  margin-bottom: 25px;
+  font-size: 1.5rem;
+  font-weight: 600;
+  border-bottom: 2px solid #f0f0f0;
+  padding-bottom: 10px;
+}
+
+.form-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.form-row .form-group {
+  margin-bottom: 0;
+}
+
+.form-group {
+  margin-bottom: 12px;
+}
+
+.form-group label {
+  display: block;
+  margin-bottom: 8px;
+  font-weight: 600;
+  color: #555;
+  font-size: 0.95rem;
+}
+
+.form-group input,
+.form-group select,
+.form-group textarea {
+  width: 100%;
+  padding: 12px 15px;
+  border: 2px solid #e1e5e9;
+  border-radius: 8px;
+  font-size: 1rem;
+  transition: all 0.3s ease;
+  background: white;
+}
+
+.form-group input:focus,
+.form-group select:focus,
+.form-group textarea:focus {
+  outline: none;
+  border-color: #667eea;
+  box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+  transform: translateY(-1px);
+}
+
+.form-group textarea {
+  resize: vertical;
+  min-height: 100px;
+}
+
+/* Ticket Group Styles */
+.ticket-group {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 15px;
+  flex-wrap: nowrap;
+  align-items: center;
+}
+
+.ticket-group label {
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.ticket-group .ticket-value {
+  width: 80px;
+  flex: 0 0 80px;
+}
+
+.ticket-group .ticket-quantity {
+  width: 60px;
+  flex: 0 0 60px;
+}
+
+.ticket-group .remove-ticket {
+  flex-shrink: 0;
+}
+
+/* Button Styles */
+.btn {
+  padding: 12px 24px;
+  border: none;
+  border-radius: 8px;
+  font-size: 1rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  position: relative;
+  overflow: hidden;
+}
+
+.btn::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(255, 255, 255, 0.2),
+    transparent
+  );
+  transition: left 0.5s;
+}
+
+.btn:hover::before {
+  left: 100%;
+}
+
+.btn-primary {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  box-shadow: 0 4px 15px rgba(102, 126, 234, 0.3);
+}
+
+.btn-primary:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(102, 126, 234, 0.4);
+}
+
+.btn-secondary {
+  background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+  color: white;
+  box-shadow: 0 4px 15px rgba(245, 87, 108, 0.3);
+}
+
+.btn-secondary:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(245, 87, 108, 0.4);
+}
+
+.btn-danger {
+  background: linear-gradient(135deg, #ff6b6b 0%, #ee5a24 100%);
+  color: white;
+  box-shadow: 0 4px 15px rgba(255, 107, 107, 0.3);
+}
+
+.btn-danger:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(255, 107, 107, 0.4);
+}
+
+.btn-group {
+  display: flex;
+  gap: 15px;
+  margin-top: 25px;
+  flex-wrap: wrap;
+}
+
+/* Preview Panel */
+.preview-panel {
+  background: white;
+  padding: 30px;
+  border-radius: 15px;
+  box-shadow: 0 8px 25px rgba(0, 0, 0, 0.1);
+  border: 1px solid rgba(102, 126, 234, 0.1);
+}
+
+.preview-panel h2 {
+  color: #667eea;
+  margin-bottom: 25px;
+  font-size: 1.5rem;
+  font-weight: 600;
+  border-bottom: 2px solid #f0f0f0;
+  padding-bottom: 10px;
+}
+
+/* A4 Page Styles */
+.a4-page {
+  width: 210mm;
+  min-height: 297mm;
+  background: white;
+  margin: 0 auto 20px;
+  padding: 0;
+  box-shadow: 0 8px 25px rgba(0, 0, 0, 0.15);
+  border-radius: 0;
+  display: flex;
+  flex-direction: column;
+  flex-wrap: wrap;
+  align-content: flex-start;
+  position: relative;
+  overflow: hidden;
+}
+
+.a4-page::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background:
+    linear-gradient(
+      90deg,
+      transparent 9.5mm,
+      rgba(102, 126, 234, 0.1) 10mm,
+      rgba(102, 126, 234, 0.1) 10.5mm,
+      transparent 11mm
+    ),
+    linear-gradient(
+      0deg,
+      transparent 9.5mm,
+      rgba(102, 126, 234, 0.1) 10mm,
+      rgba(102, 126, 234, 0.1) 10.5mm,
+      transparent 11mm
+    );
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* Label Styles */
+.label {
+  width: 100%;
+  height: 100%;
+  border: 1px solid #e0e0e0;
+  margin: 0;
+  padding: 2mm;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  text-align: center;
+  background: white;
+  border-radius: 0;
+  box-shadow: none;
+  position: relative;
+  z-index: 1;
+  overflow: hidden;
+}
+
+
+.label-text {
+  font-weight: bold;
+  color: #333;
+  line-height: 1.2;
+  word-wrap: break-word;
+  max-width: 100%;
+  position: relative;
+  z-index: 1;
+}
+
+.label-text.large {
+  font-size: 12pt;
+}
+
+.label-text.small {
+  font-size: 8pt;
+}
+
+/* Utility Classes */
+.text-center {
+  text-align: center;
+}
+
+.mt-20 {
+  margin-top: 20px;
+}
+
+.mb-20 {
+  margin-bottom: 20px;
+}
+
+.hidden {
+  display: none;
+}
+
+/* Loading Animation */
+.loading {
+  display: inline-block;
+  width: 20px;
+  height: 20px;
+  border: 3px solid rgba(255, 255, 255, 0.3);
+  border-radius: 50%;
+  border-top-color: #fff;
+  animation: spin 1s ease-in-out infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Media Queries - Responsividade */
+@media (max-width: 1200px) {
+  .container {
+    max-width: 1000px;
+    padding: 15px;
+  }
+
+  .a4-page {
+    transform: scale(0.85);
+    margin: 0 auto 15px;
+  }
+
+  header h1 {
+    font-size: 2rem;
+  }
+
+  .controls-panel,
+  .preview-panel {
+    padding: 20px;
+  }
+}
+
+@media (max-width: 968px) {
+  .main-content {
+    grid-template-columns: 1fr;
+    gap: 20px;
+  }
+
+  .a4-page {
+    transform: scale(0.7);
+    margin: 0 auto 10px;
+  }
+
+  .ticket-group {
+    flex-direction: column;
+  }
+
+  .btn-group {
+    flex-direction: column;
+  }
+
+  .btn-group .btn {
+    width: 100%;
+  }
+}
+
+@media (max-width: 768px) {
+  .container {
+    padding: 10px;
+  }
+
+  header {
+    padding: 20px;
+    margin-bottom: 20px;
+  }
+
+  header h1 {
+    font-size: 1.8rem;
+  }
+
+  .a4-page {
+    transform: scale(0.6);
+    margin: 0 auto 5px;
+  }
+
+  .controls-panel,
+  .preview-panel {
+    padding: 15px;
+  }
+
+  .form-group input,
+  .form-group select,
+  .form-group textarea {
+    padding: 10px 12px;
+  }
+
+  .btn {
+    padding: 10px 20px;
+    font-size: 0.9rem;
+  }
+}
+
+@media (max-width: 480px) {
+  header h1 {
+    font-size: 1.5rem;
+  }
+
+  header p {
+    font-size: 1rem;
+  }
+
+  .a4-page {
+    transform: scale(0.5);
+    width: 100%;
+    min-height: auto;
+  }
+
+  .label {
+    width: calc(50% - 2mm);
+    height: auto;
+    min-height: 20mm;
+  }
+
+  .controls-panel h2,
+  .preview-panel h2 {
+    font-size: 1.3rem;
+  }
+}
+
+/* Print Styles */
+@media print {
+  * {
+    -webkit-print-color-adjust: exact !important;
+    color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  body {
+    background: white !important;
+    color: black !important;
+    font-size: 12pt;
+    line-height: 1.2;
+  }
+
+  .container {
+    max-width: none;
+    margin: 0;
+    padding: 0;
+  }
+
+  header,
+  .controls-panel,
+  .page-controls,
+  .btn,
+  .btn-group {
+    display: none !important;
+  }
+
+  .main-content {
+    display: block !important;
+    grid-template-columns: 1fr !important;
+  }
+
+  .preview-panel {
+    display: block !important;
+    background: transparent !important;
+    box-shadow: none !important;
+    border: none !important;
+    padding: 0 !important;
+    margin: 0 !important;
+  }
+
+  .preview-panel h2 {
+    display: none !important;
+  }
+
+  .a4-page {
+    width: 210mm !important;
+    height: 297mm !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    box-shadow: none !important;
+    border-radius: 0 !important;
+    transform: none !important;
+    page-break-after: always;
+    display: block !important;
+    background: white !important;
+  }
+
+  .a4-page:last-child {
+    page-break-after: avoid;
+  }
+
+  .a4-page::before {
+    display: none !important;
+  }
+
+  .label {
+    width: 100% !important;
+    height: 100% !important;
+    border: 0.3pt solid #ccc !important;
+    margin: 0 !important;
+    padding: 2mm !important;
+    background: white !important;
+    box-shadow: none !important;
+    border-radius: 0 !important;
+    display: flex !important;
+    flex-direction: column !important;
+    justify-content: center !important;
+    align-items: center !important;
+    text-align: center !important;
+    page-break-inside: avoid;
+    transform: none !important;
+    overflow: hidden !important;
+    position: relative !important;
+  }
+
+  .label:hover {
+    transform: none !important;
+  }
+
+  .label-background {
+    position: absolute !important;
+    top: 0 !important;
+    left: 0 !important;
+    width: 100% !important;
+    height: 100% !important;
+    background-size: cover !important;
+    background-position: center !important;
+    background-repeat: no-repeat !important;
+    z-index: 0 !important;
+  }
+
+  .label-text {
+    font-weight: bold !important;
+    color: black !important;
+    line-height: 1.1 !important;
+    text-shadow: none !important;
+    word-wrap: break-word !important;
+    position: relative !important;
+    z-index: 1 !important;
+  }
+
+  /* Ensure proper page breaks */
+  @page {
+    size: A4;
+    margin: 0;
+  }
+
+  /* Hide any unwanted elements during print */
+  .no-print,
+  .hidden {
+    display: none !important;
+  }
+}

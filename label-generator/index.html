@@ -1,0 +1,215 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Gerador de Etiquetas - Tradição</title>
+    <link rel="stylesheet" href="styles.css" />
+    <link href="https://fonts.googleapis.com/css2?family=Oswald:wght@400;700&family=Bebas+Neue&family=Roboto+Condensed:wght@700&family=DM+Mono:wght@500&display=swap" rel="stylesheet" />
+  </head>
+  <body>
+    <div class="container">
+      <header>
+        <h1>Gerador de Etiquetas</h1>
+        <p>Configure e imprima suas etiquetas personalizadas</p>
+      </header>
+
+      <div class="main-content">
+        <div class="controls-panel">
+          <h2>Configurações</h2>
+
+          <div class="form-row">
+            <div class="form-group">
+              <label for="labelWidth">Largura (cm):</label>
+              <input type="number" id="labelWidth" min="1" max="20" step="0.1" value="7" />
+            </div>
+            <div class="form-group">
+              <label for="labelHeight">Altura (cm):</label>
+              <input type="number" id="labelHeight" min="1" max="15" step="0.1" value="3.5" />
+            </div>
+          </div>
+
+          <div class="form-row">
+            <div class="form-group">
+              <label for="marginTop">Margem Superior (cm):</label>
+              <input type="number" id="marginTop" min="0" max="5" step="0.1" value="1" />
+            </div>
+            <div class="form-group">
+              <label for="marginBottom">Margem Inferior (cm):</label>
+              <input type="number" id="marginBottom" min="0" max="5" step="0.1" value="1" />
+            </div>
+          </div>
+
+          <div class="form-row">
+            <div class="form-group">
+              <label for="marginLeft">Margem Esquerda (cm):</label>
+              <input type="number" id="marginLeft" min="0" max="5" step="0.1" value="1" />
+            </div>
+            <div class="form-group">
+              <label for="marginRight">Margem Direita (cm):</label>
+              <input type="number" id="marginRight" min="0" max="5" step="0.1" value="1" />
+            </div>
+          </div>
+
+          <div class="form-row">
+            <div class="form-group">
+              <label for="labelGap">Espaçamento (mm):</label>
+              <input type="number" id="labelGap" min="0" max="10" step="0.5" value="0" />
+            </div>
+            <div class="form-group">
+              <label for="fontSize">Tamanho Fonte (px):</label>
+              <input type="number" id="fontSize" min="8" max="48" value="14" />
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label for="backgroundImage">Imagem de Fundo:</label>
+            <input type="file" id="backgroundImage" accept="image/*" />
+          </div>
+
+          <div class="form-row">
+            <div class="form-group">
+              <label for="backgroundZoom">Zoom Imagem (%):</label>
+              <input type="number" id="backgroundZoom" min="10" max="200" step="5" value="100" />
+            </div>
+            <div class="form-group">
+              <label for="backgroundOpacity">Opacidade (0-1):</label>
+              <input type="number" id="backgroundOpacity" min="0" max="1" step="0.1" value="0.3" />
+            </div>
+          </div>
+
+          <div class="form-row">
+            <div class="form-group">
+              <label for="fontFamily">Família da Fonte:</label>
+              <select id="fontFamily">
+                <optgroup label="Para Números/Etiquetas">
+                  <option value="Oswald">Oswald</option>
+                  <option value="Bebas Neue">Bebas Neue</option>
+                  <option value="Roboto Condensed">Roboto Condensed</option>
+                  <option value="DM Mono">DM Mono</option>
+                </optgroup>
+                <optgroup label="Clássicas">
+                  <option value="Arial">Arial</option>
+                  <option value="Helvetica">Helvetica</option>
+                  <option value="Georgia">Georgia</option>
+                  <option value="Verdana">Verdana</option>
+                  <option value="Times New Roman">Times New Roman</option>
+                </optgroup>
+              </select>
+            </div>
+            <div class="form-group">
+              <label for="textColor">Cor do Texto:</label>
+              <input type="color" id="textColor" value="#000000" />
+            </div>
+          </div>
+
+          <div class="form-row">
+            <div class="form-group">
+              <label for="currencySymbol">Símbolo de Moeda:</label>
+              <input type="text" id="currencySymbol" value="R$" placeholder="Ex: R$, $, € ou vazio" />
+            </div>
+          </div>
+
+          <h3>Valores dos Tickets</h3>
+          <div id="ticketValues">
+            <div class="ticket-group">
+              <label>Valor R$:</label>
+              <input
+                type="number"
+                class="ticket-value"
+                step="0.01"
+                min="0"
+                value="5.00"
+              />
+              <label>Quantidade:</label>
+              <input type="number" class="ticket-quantity" min="1" value="5" />
+              <button class="remove-ticket" onclick="removeTicket(this)">
+                Remover
+              </button>
+            </div>
+            <div class="ticket-group">
+              <label>Valor R$:</label>
+              <input
+                type="number"
+                class="ticket-value"
+                step="0.01"
+                min="0"
+                value="10.00"
+              />
+              <label>Quantidade:</label>
+              <input type="number" class="ticket-quantity" min="1" value="3" />
+              <button class="remove-ticket" onclick="removeTicket(this)">
+                Remover
+              </button>
+            </div>
+            <div class="ticket-group">
+              <label>Valor R$:</label>
+              <input
+                type="number"
+                class="ticket-value"
+                step="0.01"
+                min="0"
+                value="20.00"
+              />
+              <label>Quantidade:</label>
+              <input type="number" class="ticket-quantity" min="1" value="2" />
+              <button class="remove-ticket" onclick="removeTicket(this)">
+                Remover
+              </button>
+            </div>
+          </div>
+
+          <button id="addTicket" onclick="addTicket()">Adicionar Valor</button>
+
+          <div class="form-group">
+            <label for="customText">Texto Personalizado (opcional):</label>
+            <textarea
+              id="customText"
+              rows="3"
+              placeholder="Digite texto adicional para as etiquetas"
+            ></textarea>
+          </div>
+
+          <div class="form-group">
+            <label for="configFile">Importar Configuração:</label>
+            <input
+              type="file"
+              id="configFile"
+              accept=".json"
+              onchange="importConfig(event)"
+            />
+          </div>
+
+          <button id="exportConfig" onclick="exportConfig()">
+            Exportar Configuração
+          </button>
+
+          <button id="generateLabels" onclick="generateLabels()">
+            Gerar Etiquetas
+          </button>
+          <button id="printLabels" onclick="printLabels()">Imprimir</button>
+        </div>
+
+        <div class="preview-panel">
+          <h2>Visualização</h2>
+          <div class="page-controls">
+            <button onclick="previousPage()" id="prevBtn">
+              Página Anterior
+            </button>
+            <span id="pageInfo">Página 1 de 1</span>
+            <button onclick="nextPage()" id="nextBtn">Próxima Página</button>
+          </div>
+          <div id="preview" class="preview-container">
+            <!-- As etiquetas serão geradas aqui -->
+          </div>
+        </div>
+      </div>
+
+      <div class="print-area" id="printArea">
+        <!-- Área de impressão -->
+      </div>
+    </div>
+
+    <script src="script.js"></script>
+  </body>
+</html>

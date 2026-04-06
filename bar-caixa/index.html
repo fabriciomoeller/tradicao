@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Bar Caixa</title>
+  <link rel="stylesheet" href="styles.css">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.min.js"></script>
+</head>
+<body>
+  <header>
+    <h1 id="store-name">Bar Tradição</h1>
+    <button onclick="UI.showSettings()" class="btn-icon" title="Configurações">⚙</button>
+  </header>
+
+  <nav>
+    <button class="tab-btn active" data-tab="fichas" onclick="UI.showTab('fichas')">🎫 Fichas</button>
+    <button class="tab-btn" data-tab="pdv" onclick="UI.showTab('pdv')">🛒 PDV</button>
+    <button class="tab-btn" data-tab="produtos" onclick="UI.showTab('produtos')">📦 Produtos</button>
+    <button class="tab-btn" data-tab="estoque" onclick="UI.showTab('estoque')">📊 Estoque</button>
+    <button class="tab-btn" data-tab="caixa" onclick="UI.showTab('caixa')">💰 Caixa</button>
+  </nav>
+
+  <main>
+    <!-- FICHAS -->
+    <section id="tab-fichas" class="tab-content active">
+      <h2>Venda de Fichas</h2>
+      <p class="section-hint">Selecione as denominações que o cliente está comprando:</p>
+      <div class="denominacoes">
+        <button class="btn-ficha" onclick="Tokens.add(1)">R$ 1</button>
+        <button class="btn-ficha" onclick="Tokens.add(2)">R$ 2</button>
+        <button class="btn-ficha" onclick="Tokens.add(5)">R$ 5</button>
+        <button class="btn-ficha" onclick="Tokens.add(10)">R$ 10</button>
+        <button class="btn-ficha" onclick="Tokens.add(20)">R$ 20</button>
+      </div>
+
+      <div class="ficha-cart" id="ficha-cart">
+        <div class="ficha-total-line">
+          <span>Total:</span>
+          <span id="ficha-total" class="ficha-total-value">R$ 0,00</span>
+        </div>
+        <div id="ficha-breakdown" class="ficha-breakdown"></div>
+      </div>
+
+      <div class="payment-methods">
+        <button class="btn-pay btn-cash" onclick="Tokens.pay('dinheiro')">💵 Pagar Dinheiro</button>
+        <button class="btn-pay btn-pix" onclick="Tokens.pay('pix')">📱 Pagar PIX</button>
+      </div>
+      <button class="btn-clear" onclick="Tokens.clear()">Limpar</button>
+    </section>
+
+    <!-- PDV -->
+    <section id="tab-pdv" class="tab-content">
+      <div class="pdv-layout">
+        <div class="product-grid" id="product-grid"></div>
+        <div class="cart-panel">
+          <h2>Pedido Atual</h2>
+          <div id="cart-items" class="cart-items"></div>
+          <div class="cart-total-line">
+            <strong>Total: <span id="cart-total">R$ 0,00</span></strong>
+          </div>
+          <button class="btn-checkout" onclick="Sales.checkout()">✓ Confirmar Venda</button>
+          <button class="btn-clear-cart" onclick="Sales.clearCart()">🗑 Limpar</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- PRODUTOS -->
+    <section id="tab-produtos" class="tab-content">
+      <div class="section-header">
+        <h2>Produtos</h2>
+        <div class="section-actions">
+          <button class="btn-secondary" onclick="UI.showCategoryList()">🏷 Categorias</button>
+          <button class="btn-secondary" onclick="UI.showImportCSV()">⬆ Importar CSV</button>
+          <button class="btn-primary" onclick="UI.showProductForm()">+ Novo Produto</button>
+        </div>
+      </div>
+      <div class="produtos-filter-bar">
+        <input id="produtos-filter" type="text" placeholder="Filtrar por nome ou categoria…" oninput="UI.renderProductList()" autocomplete="off">
+      </div>
+      <div id="produtos-list"></div>
+    </section>
+
+    <!-- ESTOQUE -->
+    <section id="tab-estoque" class="tab-content">
+      <h2>Estoque Visual</h2>
+      <div class="chart-container">
+        <canvas id="stock-chart"></canvas>
+      </div>
+    </section>
+
+    <!-- CAIXA -->
+    <section id="tab-caixa" class="tab-content">
+      <h2>Caixa</h2>
+      <div id="caixa-summary"></div>
+    </section>
+  </main>
+
+  <!-- MODAL -->
+  <div id="modal-overlay" class="modal-overlay hidden" onclick="UI.overlayClick(event)">
+    <div id="modal-content" class="modal-content"></div>
+  </div>
+
+  <div id="toast-container"></div>
+
+  <script src="app.js"></script>
+</body>
+</html>

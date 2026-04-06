@@ -1,0 +1,4 @@
+node_modules/
+bar-caixa.db
+bar-caixa.db-shm
+bar-caixa.db-wal

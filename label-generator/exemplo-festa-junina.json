@@ -1,0 +1,31 @@
+{
+  "labelWidth": "7",
+  "labelHeight": "3.5",
+  "marginTop": "1",
+  "marginBottom": "1",
+  "marginLeft": "1",
+  "marginRight": "1",
+  "backgroundOpacity": "0.3",
+  "fontSize": "16",
+  "fontFamily": "Arial",
+  "textColor": "#000080",
+  "customText": "Festa Junina 2024",
+  "tickets": [
+    {
+      "value": 2,
+      "quantity": 50
+    },
+    {
+      "value": 5,
+      "quantity": 30
+    },
+    {
+      "value": 10,
+      "quantity": 20
+    },
+    {
+      "value": 20,
+      "quantity": 10
+    }
+  ]
+}
