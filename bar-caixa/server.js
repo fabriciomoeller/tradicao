@@ -155,6 +155,7 @@ function readState() {
     sales,
     cashRegister: {
       openedAt: open ? open.opened_at : new Date().toISOString(),
+      accumulatedProfit: parseFloat(settings.accumulated_profit || '0'),
       history: sessions
         .filter(s => s.closed_at)
         .map(s => ({ id: s.id, openedAt: s.opened_at, closedAt: s.closed_at,
@@ -212,6 +213,10 @@ const persistState = db.transaction((state) => {
 
   // ── cash register ──
   if (state.cashRegister) {
+    // lucro acumulado
+    if (state.cashRegister.accumulatedProfit !== undefined) {
+      stmts.upsertSetting.run('accumulated_profit', String(state.cashRegister.accumulatedProfit));
+    }
     // sessão aberta
     const open = stmts.openSession.get();
     if (!open) {

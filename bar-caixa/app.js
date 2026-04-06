@@ -28,7 +28,7 @@ const DB = {
       products: [],
       tokenSales: [],   // { id, ts, amount, method, denoms:{1:n,2:n,...} }
       sales: [],        // { id, ts, items:[{pid,name,price,qty}], total }
-      cashRegister: { openedAt: new Date().toISOString(), history: [] }
+      cashRegister: { openedAt: new Date().toISOString(), accumulatedProfit: 0, history: [] }
     };
   },
 
@@ -538,17 +538,26 @@ const Reports = {
     const totalSales  = sl.reduce((s, t) => s + t.total, 0);
     const totalItems  = sl.reduce((s, t) => s + t.items.reduce((si, i) => si + i.qty, 0), 0);
 
-    const prodMap = {};
-    data.products.forEach(p => { prodMap[p.id] = p.category || 'Outro'; });
+    const prodMap  = {};
+    const costMap  = {};
+    data.products.forEach(p => {
+      prodMap[p.id] = p.category || 'Outro';
+      costMap[p.id] = p.costPrice || 0;
+    });
 
     const byProduct = {};
     sl.forEach(sale => sale.items.forEach(i => {
-      if (!byProduct[i.name]) byProduct[i.name] = { qty: 0, total: 0, category: prodMap[i.pid] || i.category || 'Outro' };
+      if (!byProduct[i.name]) byProduct[i.name] = { qty: 0, total: 0, cost: 0, category: prodMap[i.pid] || i.category || 'Outro' };
       byProduct[i.name].qty   += i.qty;
       byProduct[i.name].total += i.price * i.qty;
+      byProduct[i.name].cost  += (costMap[i.pid] || 0) * i.qty;
     }));
 
+    const totalCost   = Object.values(byProduct).reduce((s, v) => s + v.cost, 0);
+    const totalProfit = totalSales - totalCost;
+
     return { totalTokens, totalPix, totalCash, totalSales, totalItems,
+             totalCost, totalProfit,
              byProduct, salesCount: sl.length, tokenSalesCount: ts.length };
   },
 
@@ -561,12 +570,14 @@ const Reports = {
     DB.update(d => {
       d.cashRegister.history.push(report);
       d.cashRegister.openedAt = new Date().toISOString();
+      d.cashRegister.accumulatedProfit = (d.cashRegister.accumulatedProfit || 0) + (s.totalProfit || 0);
       d.tokenSales = [];
       d.sales = [];
       d.products.forEach(p => { p.soldQty = 0; p.initialStock = p.stock; });
     });
     Charts.render();
     UI.renderCaixa();
+    if (UI.currentTab === 'lucro') UI.renderLucro();
     UI.showModal(this._reportHTML(report));
   },
 
@@ -707,6 +718,7 @@ const UI = {
     this.currentTab = tab;
     if (tab === 'estoque') Charts.render();
     if (tab === 'caixa')   this.renderCaixa();
+    if (tab === 'lucro')   this.renderLucro();
     if (tab === 'pdv')     this.renderPDVGrid();
     if (tab === 'produtos') this.renderProductList();
   },
@@ -843,6 +855,113 @@ const UI = {
         </div>` : ''}
 
       <button class="btn-danger" onclick="Reports.close()">🔒 Fechar Caixa e Gerar Relatório</button>`;
+  },
+
+  // ── LUCRO ──
+  renderLucro() {
+    const data = DB.get();
+    const s    = Reports.summary(data);
+    const el   = document.getElementById('lucro-summary');
+
+    const accumulatedProfit = data.cashRegister.accumulatedProfit || 0;
+    const totalProfit       = s.totalProfit + accumulatedProfit;
+
+    // Agrupa byProduct por categoria
+    const cats = {};
+    Object.entries(s.byProduct).forEach(([name, v]) => {
+      const cat = v.category || 'Outro';
+      if (!cats[cat]) cats[cat] = { qty: 0, cost: 0, revenue: 0, profit: 0, items: [] };
+      const profit = v.total - v.cost;
+      cats[cat].qty     += v.qty;
+      cats[cat].cost    += v.cost;
+      cats[cat].revenue += v.total;
+      cats[cat].profit  += profit;
+      cats[cat].items.push({ name, qty: v.qty, cost: v.cost, revenue: v.total, profit });
+    });
+
+    const catEntries = Object.entries(cats).sort((a, b) => b[1].revenue - a[1].revenue);
+
+    const totalQtyAll     = catEntries.reduce((s, [, g]) => s + g.qty, 0);
+    const totalCostAll    = catEntries.reduce((s, [, g]) => s + g.cost, 0);
+    const totalRevenueAll = catEntries.reduce((s, [, g]) => s + g.revenue, 0);
+    const totalProfitCur  = totalRevenueAll - totalCostAll;
+
+    const pct = (num, den) => den === 0 ? '—' : (num / den * 100).toFixed(1) + '%';
+
+    const tableRows = catEntries.length === 0
+      ? `<tr><td colspan="7" style="text-align:center;color:var(--muted);padding:1.5rem">Nenhuma venda nesta sessão.</td></tr>`
+      : catEntries.map(([cat, g]) => {
+          const prodRows = g.items
+            .sort((a, b) => b.revenue - a.revenue)
+            .map(i => `
+              <tr class="lucro-prod-row">
+                <td style="padding-left:1.5rem;color:var(--muted)">${esc(i.name)}</td>
+                <td class="lucro-num">${i.qty}</td>
+                <td class="lucro-num lucro-pct">${pct(i.qty, totalQtyAll)}</td>
+                <td class="lucro-num">${fmt(i.cost)}</td>
+                <td class="lucro-num">${fmt(i.revenue)}</td>
+                <td class="lucro-num ${i.profit >= 0 ? 'lucro-pos' : 'lucro-neg'}">${fmt(i.profit)}</td>
+                <td class="lucro-num lucro-pct">${pct(i.profit, i.revenue)}</td>
+              </tr>`).join('');
+          return `
+            <tr class="lucro-cat-row">
+              <td><strong>${esc(cat)}</strong></td>
+              <td class="lucro-num"><strong>${g.qty}</strong></td>
+              <td class="lucro-num lucro-pct"><strong>${pct(g.qty, totalQtyAll)}</strong></td>
+              <td class="lucro-num"><strong>${fmt(g.cost)}</strong></td>
+              <td class="lucro-num"><strong>${fmt(g.revenue)}</strong></td>
+              <td class="lucro-num ${g.profit >= 0 ? 'lucro-pos' : 'lucro-neg'}"><strong>${fmt(g.profit)}</strong></td>
+              <td class="lucro-num lucro-pct"><strong>${pct(g.profit, g.revenue)}</strong></td>
+            </tr>
+            ${prodRows}`;
+        }).join('');
+
+    el.innerHTML = `
+      <div class="cards-grid" style="margin-bottom:1.25rem">
+        <div class="stat-card">
+          <div class="sc-label">Lucro desta sessão</div>
+          <div class="sc-value ${totalProfitCur >= 0 ? 'sc-success' : 'sc-danger'}">${fmt(totalProfitCur)}</div>
+        </div>
+        <div class="stat-card">
+          <div class="sc-label">Lucro acumulado (fechamentos)</div>
+          <div class="sc-value ${accumulatedProfit >= 0 ? 'sc-success' : 'sc-danger'}">${fmt(accumulatedProfit)}</div>
+        </div>
+        <div class="stat-card">
+          <div class="sc-label">Lucro total</div>
+          <div class="sc-value ${totalProfit >= 0 ? 'sc-success' : 'sc-danger'}">${fmt(totalProfit)}</div>
+        </div>
+      </div>
+
+      <div class="report-section">
+        <h3>Sessão atual — por categoria</h3>
+        <table class="data-table lucro-table">
+          <thead>
+            <tr>
+              <th>Produto</th>
+              <th class="lucro-num">Qtd</th>
+              <th class="lucro-num lucro-pct">% Qtd</th>
+              <th class="lucro-num">Custo</th>
+              <th class="lucro-num">Venda</th>
+              <th class="lucro-num">Lucro</th>
+              <th class="lucro-num lucro-pct">% Margem</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${tableRows}
+          </tbody>
+          <tfoot>
+            <tr class="lucro-total-row">
+              <td><strong>TOTAL</strong></td>
+              <td class="lucro-num"><strong>${totalQtyAll}</strong></td>
+              <td class="lucro-num lucro-pct"><strong>100%</strong></td>
+              <td class="lucro-num"><strong>${fmt(totalCostAll)}</strong></td>
+              <td class="lucro-num"><strong>${fmt(totalRevenueAll)}</strong></td>
+              <td class="lucro-num ${totalProfitCur >= 0 ? 'lucro-pos' : 'lucro-neg'}"><strong>${fmt(totalProfitCur)}</strong></td>
+              <td class="lucro-num lucro-pct"><strong>${pct(totalProfitCur, totalRevenueAll)}</strong></td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>`;
   },
 
   // ── MODALS ──

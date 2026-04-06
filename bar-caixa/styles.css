@@ -436,7 +436,23 @@ table.data-table {
 .stat-card .sc-value { font-size: 1.7rem; font-weight: 700; color: var(--success); }
 .sc-pix   { color: var(--pix)  !important; }
 .sc-cash  { color: var(--cash) !important; }
-.sc-plain { color: var(--text) !important; }
+.sc-plain   { color: var(--text)    !important; }
+.sc-success { color: var(--success) !important; }
+.sc-danger  { color: var(--danger)  !important; }
+
+/* ── LUCRO ── */
+.lucro-table .lucro-num { text-align: right; font-variant-numeric: tabular-nums; }
+.lucro-table .lucro-pct { color: var(--muted); font-size: 0.8rem; }
+.lucro-pos { color: var(--success) !important; font-weight: 600; }
+.lucro-neg { color: var(--danger)  !important; font-weight: 600; }
+.lucro-cat-row td { background: var(--surface); border-top: 1px solid var(--border); }
+.lucro-prod-row td { font-size: 0.83rem; }
+.lucro-total-row td {
+  background: var(--surface);
+  border-top: 2px solid var(--border);
+  font-size: 0.93rem;
+}
+.lucro-table tfoot tr:last-child td { border-bottom: none; }
 
 .report-section {
   background: var(--card);
