@@ -28,7 +28,8 @@ const DB = {
       products: [],
       tokenSales: [],   // { id, ts, amount, method, denoms:{1:n,2:n,...} }
       sales: [],        // { id, ts, items:[{pid,name,price,qty}], total }
-      cashRegister: { openedAt: new Date().toISOString(), accumulatedProfit: 0, history: [] }
+      cashRegister: { openedAt: new Date().toISOString(), accumulatedProfit: 0, history: [] },
+      fixedCosts: []    // { id, name, qty, unitCost }
     };
   },
 
@@ -150,6 +151,31 @@ const Categories = {
     UI.renderProductList();
     UI.renderPDVGrid();
     UI.showCategoryList();
+  }
+};
+
+// ─────────────────────────────────────────────
+// CUSTOS FIXOS
+// ─────────────────────────────────────────────
+const FixedCosts = {
+  all() { return (DB.get().fixedCosts || []); },
+
+  total() { return this.all().reduce((s, c) => s + c.qty * c.unitCost, 0); },
+
+  save(item) {
+    DB.update(d => {
+      if (!d.fixedCosts) d.fixedCosts = [];
+      const idx = d.fixedCosts.findIndex(c => c.id === item.id);
+      if (idx >= 0) d.fixedCosts[idx] = item;
+      else d.fixedCosts.push({ ...item, id: uid() });
+    });
+    UI.renderLucro();
+  },
+
+  delete(id) {
+    if (!confirm('Excluir este custo fixo?')) return;
+    DB.update(d => { d.fixedCosts = (d.fixedCosts || []).filter(c => c.id !== id); });
+    UI.renderLucro();
   }
 };
 
@@ -553,11 +579,12 @@ const Reports = {
       byProduct[i.name].cost  += (costMap[i.pid] || 0) * i.qty;
     }));
 
-    const totalCost   = Object.values(byProduct).reduce((s, v) => s + v.cost, 0);
-    const totalProfit = totalSales - totalCost;
+    const totalCost        = Object.values(byProduct).reduce((s, v) => s + v.cost, 0);
+    const totalFixedCosts  = FixedCosts.total();
+    const totalProfit      = totalSales - totalCost - totalFixedCosts;
 
     return { totalTokens, totalPix, totalCash, totalSales, totalItems,
-             totalCost, totalProfit,
+             totalCost, totalFixedCosts, totalProfit,
              byProduct, salesCount: sl.length, tokenSalesCount: ts.length };
   },
 
@@ -662,6 +689,19 @@ const Reports = {
       stockSection += `| ${p.name} | ${p.category || '-'} | ${initial} | ${p.soldQty || 0} | ${p.stock} | ${status} |\n`;
     });
 
+    // ── Custos fixos ──
+    const fixedCostsList = FixedCosts.all();
+    let fixedSection = `| Descrição | Qtd | Custo Unit. | Total |\n`;
+    fixedSection    += `|-----------|----:|------------:|------:|\n`;
+    if (fixedCostsList.length === 0) {
+      fixedSection += `| _Nenhum custo fixo cadastrado_ | | | |\n`;
+    } else {
+      fixedCostsList.forEach(c => {
+        fixedSection += `| ${c.name} | ${c.qty} | ${fmtMD(c.unitCost)} | ${fmtMD(c.qty * c.unitCost)} |\n`;
+      });
+      fixedSection += `| **TOTAL** | | | **${fmtMD(s.totalFixedCosts)}** |\n`;
+    }
+
     // ── Catálogo de preços ──
     let catalogSection = `| Produto | Categoria | Custo | Preço de Venda | Margem |\n`;
     catalogSection    += `|---------|-----------|------:|---------------:|-------:|\n`;
@@ -687,6 +727,7 @@ const Reports = {
 | **Total fichas** | **${fmtMD(s.totalTokens)}** |
 | Receita produtos | ${fmtMD(s.totalSales)} |
 | Custo produtos | ${fmtMD(s.totalCost)} |
+| Custos fixos | ${fmtMD(s.totalFixedCosts)} |
 | **Lucro sessão atual** | **${fmtMD(s.totalProfit)}** |
 | Lucro acumulado (fechamentos anteriores) | ${fmtMD(accumulatedProfit)} |
 | **Lucro total do evento** | **${fmtMD(totalProfit)}** |
@@ -696,16 +737,21 @@ const Reports = {
 
 ---
 
-## 2. Vendas por Categoria e Produto
+## 2. Custos Fixos do Evento
+
+${fixedSection}
+---
+
+## 3. Vendas por Categoria e Produto
 ${salesSection}
 ---
 
-## 3. Posição de Estoque
+## 4. Posição de Estoque
 
 ${stockSection}
 ---
 
-## 4. Catálogo de Preços
+## 5. Catálogo de Preços
 
 ${catalogSection}
 ---
@@ -1083,6 +1129,8 @@ const UI = {
 
     const accumulatedProfit = data.cashRegister.accumulatedProfit || 0;
     const totalProfit       = s.totalProfit + accumulatedProfit;
+    const fixedCosts        = FixedCosts.all();
+    const totalFixedCosts   = s.totalFixedCosts;
 
     // Agrupa byProduct por categoria
     const cats = {};
@@ -1102,7 +1150,7 @@ const UI = {
     const totalQtyAll     = catEntries.reduce((s, [, g]) => s + g.qty, 0);
     const totalCostAll    = catEntries.reduce((s, [, g]) => s + g.cost, 0);
     const totalRevenueAll = catEntries.reduce((s, [, g]) => s + g.revenue, 0);
-    const totalProfitCur  = totalRevenueAll - totalCostAll;
+    const totalProfitCur  = totalRevenueAll - totalCostAll - totalFixedCosts;
 
     const pct = (num, den) => den === 0 ? '—' : (num / den * 100).toFixed(1) + '%';
 
@@ -1134,8 +1182,35 @@ const UI = {
             ${prodRows}`;
         }).join('');
 
+    // ── Linhas de custos fixos ──
+    const fixedRows = fixedCosts.length === 0
+      ? `<tr><td colspan="5" style="text-align:center;color:var(--muted);padding:1rem">Nenhum custo fixo cadastrado.</td></tr>`
+      : fixedCosts.map(c => `
+          <tr>
+            <td>${esc(c.name)}</td>
+            <td class="lucro-num">${c.qty}</td>
+            <td class="lucro-num">${fmt(c.unitCost)}</td>
+            <td class="lucro-num lucro-neg"><strong>${fmt(c.qty * c.unitCost)}</strong></td>
+            <td style="white-space:nowrap;display:flex;gap:0.4rem">
+              <button class="action-btn ab-edit"   onclick="UI.showFixedCostForm('${c.id}')">✏ Editar</button>
+              <button class="action-btn ab-delete" onclick="FixedCosts.delete('${c.id}')">🗑</button>
+            </td>
+          </tr>`).join('');
+
     el.innerHTML = `
       <div class="cards-grid" style="margin-bottom:1.25rem">
+        <div class="stat-card">
+          <div class="sc-label">Receita produtos</div>
+          <div class="sc-value">${fmt(totalRevenueAll)}</div>
+        </div>
+        <div class="stat-card">
+          <div class="sc-label">Custo produtos</div>
+          <div class="sc-value sc-danger">${fmt(totalCostAll)}</div>
+        </div>
+        <div class="stat-card">
+          <div class="sc-label">Custos fixos</div>
+          <div class="sc-value sc-danger">${fmt(totalFixedCosts)}</div>
+        </div>
         <div class="stat-card">
           <div class="sc-label">Lucro desta sessão</div>
           <div class="sc-value ${totalProfitCur >= 0 ? 'sc-success' : 'sc-danger'}">${fmt(totalProfitCur)}</div>
@@ -1145,9 +1220,31 @@ const UI = {
           <div class="sc-value ${accumulatedProfit >= 0 ? 'sc-success' : 'sc-danger'}">${fmt(accumulatedProfit)}</div>
         </div>
         <div class="stat-card">
-          <div class="sc-label">Lucro total</div>
+          <div class="sc-label">Lucro total do evento</div>
           <div class="sc-value ${totalProfit >= 0 ? 'sc-success' : 'sc-danger'}">${fmt(totalProfit)}</div>
         </div>
+      </div>
+
+      <div class="report-section">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.75rem">
+          <h3 style="margin:0">Custos Fixos do Evento</h3>
+          <button class="btn-primary" style="font-size:0.8rem;padding:0.35rem 0.8rem" onclick="UI.showFixedCostForm()">+ Adicionar</button>
+        </div>
+        <table class="data-table">
+          <thead><tr>
+            <th>Descrição</th>
+            <th class="lucro-num">Qtd</th>
+            <th class="lucro-num">Custo Unit.</th>
+            <th class="lucro-num">Total</th>
+            <th>Ações</th>
+          </tr></thead>
+          <tbody>${fixedRows}</tbody>
+          ${fixedCosts.length > 0 ? `<tfoot><tr class="lucro-total-row">
+            <td colspan="3"><strong>TOTAL CUSTOS FIXOS</strong></td>
+            <td class="lucro-num lucro-neg"><strong>${fmt(totalFixedCosts)}</strong></td>
+            <td></td>
+          </tr></tfoot>` : ''}
+        </table>
       </div>
 
       <div class="report-section">
@@ -1169,11 +1266,22 @@ const UI = {
           </tbody>
           <tfoot>
             <tr class="lucro-total-row">
-              <td><strong>TOTAL</strong></td>
+              <td><strong>Subtotal produtos</strong></td>
               <td class="lucro-num"><strong>${totalQtyAll}</strong></td>
               <td class="lucro-num lucro-pct"><strong>100%</strong></td>
               <td class="lucro-num"><strong>${fmt(totalCostAll)}</strong></td>
               <td class="lucro-num"><strong>${fmt(totalRevenueAll)}</strong></td>
+              <td class="lucro-num lucro-pos"><strong>${fmt(totalRevenueAll - totalCostAll)}</strong></td>
+              <td class="lucro-num lucro-pct"><strong>${pct(totalRevenueAll - totalCostAll, totalRevenueAll)}</strong></td>
+            </tr>
+            ${totalFixedCosts > 0 ? `<tr style="color:var(--muted);font-size:0.85rem">
+              <td colspan="5" style="text-align:right;padding-right:1rem">(-) Custos fixos</td>
+              <td class="lucro-num lucro-neg"><strong>${fmt(totalFixedCosts)}</strong></td>
+              <td></td>
+            </tr>` : ''}
+            <tr class="lucro-total-row">
+              <td><strong>LUCRO LÍQUIDO</strong></td>
+              <td colspan="4"></td>
               <td class="lucro-num ${totalProfitCur >= 0 ? 'lucro-pos' : 'lucro-neg'}"><strong>${fmt(totalProfitCur)}</strong></td>
               <td class="lucro-num lucro-pct"><strong>${pct(totalProfitCur, totalRevenueAll)}</strong></td>
             </tr>
@@ -1183,6 +1291,42 @@ const UI = {
   },
 
   // ── MODALS ──
+  showFixedCostForm(id) {
+    const c = id ? FixedCosts.all().find(x => x.id === id) : null;
+    this.showModal(`
+      <h2>${c ? 'Editar Custo Fixo' : 'Novo Custo Fixo'}</h2>
+      <div class="form-group">
+        <label>Descrição</label>
+        <input id="fc-name" type="text" value="${c ? esc(c.name) : ''}" placeholder="Ex: Caixa térmica 360L">
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label>Quantidade</label>
+          <input id="fc-qty" type="number" min="1" step="1" value="${c ? c.qty : 1}">
+        </div>
+        <div class="form-group">
+          <label>Custo unitário (R$)</label>
+          <input id="fc-unit" type="number" min="0" step="0.01" value="${c ? c.unitCost : ''}">
+        </div>
+      </div>
+      <div class="modal-actions">
+        <button class="btn-secondary" onclick="UI.closeModal()">Cancelar</button>
+        <button class="btn-primary" onclick="UI._saveFixedCost('${c ? c.id : ''}')">Salvar</button>
+      </div>`);
+  },
+
+  _saveFixedCost(id) {
+    const name     = document.getElementById('fc-name').value.trim();
+    const qty      = parseFloat(document.getElementById('fc-qty').value);
+    const unitCost = parseFloat(document.getElementById('fc-unit').value);
+    if (!name)              { this.toast('Informe a descrição!', 'warning'); return; }
+    if (isNaN(qty) || qty <= 0)         { this.toast('Quantidade inválida!', 'warning'); return; }
+    if (isNaN(unitCost) || unitCost < 0){ this.toast('Custo inválido!', 'warning'); return; }
+    FixedCosts.save({ id: id || null, name, qty, unitCost });
+    this.closeModal();
+    this.toast('Custo fixo salvo!', 'success');
+  },
+
   showProductForm(id) {
     const p = id ? Products.byId(id) : null;
     const cats = Categories.all();
