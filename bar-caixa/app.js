@@ -25,6 +25,9 @@ const DB = {
         pixDesc: 'BARCAIXA'
       },
       categories: [],
+      almoxarifados: [],   // { id, name, type, rank }
+      productStocks: [],   // { productId, almoxarifadoId, qty }
+      stockMovements: [],  // { id, ts, type, productId, productName, fromAlmoxId, fromAlmoxName, toAlmoxId, toAlmoxName, qty, note }
       products: [],
       tokenSales: [],   // { id, ts, amount, method, denoms:{1:n,2:n,...} }
       sales: [],        // { id, ts, items:[{pid,name,price,qty}], total }
@@ -176,6 +179,163 @@ const FixedCosts = {
     if (!confirm('Excluir este custo fixo?')) return;
     DB.update(d => { d.fixedCosts = (d.fixedCosts || []).filter(c => c.id !== id); });
     UI.renderLucro();
+  }
+};
+
+// ─────────────────────────────────────────────
+// ALMOXARIFADOS
+// ─────────────────────────────────────────────
+const ALMOX_TYPES = [
+  { id: 'consignado', name: 'Consignado', icon: '📋' },
+  { id: 'freezer',    name: 'Freezer',    icon: '🧊' },
+  { id: 'proprio',    name: 'Próprio',    icon: '🏪' },
+  { id: 'outro',      name: 'Outro',      icon: '📦' },
+];
+
+const Almoxarifados = {
+  all()    { return DB.get().almoxarifados || []; },
+  byId(id) { return this.all().find(a => a.id === id) || null; },
+  typeInfo(type) { return ALMOX_TYPES.find(t => t.id === type) || ALMOX_TYPES[3]; },
+
+  save(a) {
+    DB.update(d => {
+      if (!d.almoxarifados) d.almoxarifados = [];
+      const idx = d.almoxarifados.findIndex(x => x.id === a.id);
+      if (idx >= 0) d.almoxarifados[idx] = a;
+      else d.almoxarifados.push(a);
+    });
+  },
+
+  delete(id) {
+    const a = this.byId(id);
+    if (!a) return;
+    const prods = Products.all().filter(p => p.activeAlmoxId === id);
+    if (prods.length > 0) {
+      alert(`Não é possível excluir: ${prods.length} produto(s) usam este almoxarifado como fonte de vendas.\nAltere o almoxarifado de venda desses produtos primeiro.`);
+      return;
+    }
+    if (!confirm(`Excluir o almoxarifado "${a.name}"?\nTodo o estoque registrado nele será perdido.`)) return;
+    DB.update(d => {
+      d.almoxarifados = d.almoxarifados.filter(x => x.id !== id);
+      d.productStocks = (d.productStocks || []).filter(ps => ps.almoxarifadoId !== id);
+      d.products.forEach(p => {
+        p.stock = (d.productStocks || [])
+          .filter(ps => ps.productId === p.id)
+          .reduce((s, ps) => s + ps.qty, 0);
+      });
+    });
+    UI.renderProductList();
+    UI.renderPDVGrid();
+    UI.showAlmoxList();
+  }
+};
+
+// ─────────────────────────────────────────────
+// STOCK  (controle de estoque por almoxarifado)
+// ─────────────────────────────────────────────
+const Stock = {
+  // Todas as entradas de estoque de um produto
+  forProduct(productId) {
+    return (DB.get().productStocks || []).filter(ps => ps.productId === productId);
+  },
+
+  // Quantidade em um almoxarifado específico
+  qty(productId, almoxId) {
+    const entry = (DB.get().productStocks || []).find(ps => ps.productId === productId && ps.almoxarifadoId === almoxId);
+    return entry ? entry.qty : 0;
+  },
+
+  // Total geral (soma de todos os almoxarifados)
+  total(productId) {
+    return (DB.get().productStocks || [])
+      .filter(ps => ps.productId === productId)
+      .reduce((s, ps) => s + ps.qty, 0);
+  },
+
+  // Sincroniza p.stock com a soma dos productStocks (chamado após qualquer movimentação)
+  _syncTotal(d, productId) {
+    const prod = d.products.find(x => x.id === productId);
+    if (prod) {
+      prod.stock = (d.productStocks || [])
+        .filter(ps => ps.productId === productId)
+        .reduce((s, ps) => s + ps.qty, 0);
+    }
+  },
+
+  // Entrada de estoque em um almoxarifado
+  entrada(productId, almoxId, qty, note = '') {
+    const p = Products.byId(productId);
+    const a = Almoxarifados.byId(almoxId);
+    if (!p || !a || qty <= 0) return false;
+    DB.update(d => {
+      if (!d.productStocks)  d.productStocks  = [];
+      if (!d.stockMovements) d.stockMovements = [];
+      const entry = d.productStocks.find(ps => ps.productId === productId && ps.almoxarifadoId === almoxId);
+      if (entry) entry.qty += qty;
+      else d.productStocks.push({ productId, almoxarifadoId: almoxId, qty });
+      d.stockMovements.push({
+        id: uid(), ts: new Date().toISOString(), type: 'entrada',
+        productId, productName: p.name,
+        fromAlmoxId: null, fromAlmoxName: null,
+        toAlmoxId: almoxId, toAlmoxName: a.name,
+        qty, note
+      });
+      this._syncTotal(d, productId);
+    });
+    return true;
+  },
+
+  // Transferência entre almoxarifados
+  transferir(productId, fromAlmoxId, toAlmoxId, qty) {
+    const p     = Products.byId(productId);
+    const fromA = Almoxarifados.byId(fromAlmoxId);
+    const toA   = Almoxarifados.byId(toAlmoxId);
+    if (!p || !fromA || !toA || qty <= 0) return false;
+    if (this.qty(productId, fromAlmoxId) < qty) return false;
+    DB.update(d => {
+      if (!d.productStocks)  d.productStocks  = [];
+      if (!d.stockMovements) d.stockMovements = [];
+      const fromEntry = d.productStocks.find(ps => ps.productId === productId && ps.almoxarifadoId === fromAlmoxId);
+      if (fromEntry) fromEntry.qty = Math.max(0, fromEntry.qty - qty);
+      const toEntry = d.productStocks.find(ps => ps.productId === productId && ps.almoxarifadoId === toAlmoxId);
+      if (toEntry) toEntry.qty += qty;
+      else d.productStocks.push({ productId, almoxarifadoId: toAlmoxId, qty });
+      d.stockMovements.push({
+        id: uid(), ts: new Date().toISOString(), type: 'transferencia',
+        productId, productName: p.name,
+        fromAlmoxId, fromAlmoxName: fromA.name,
+        toAlmoxId, toAlmoxName: toA.name,
+        qty, note: ''
+      });
+      // Transferência não muda o total — não precisa syncTotal
+    });
+    return true;
+  },
+
+  // Ajuste manual (define quantidade absoluta)
+  ajustar(productId, almoxId, newQty, note = 'Ajuste manual') {
+    const p = Products.byId(productId);
+    const a = Almoxarifados.byId(almoxId);
+    if (!p || !a || newQty < 0) return false;
+    const oldQty = this.qty(productId, almoxId);
+    const diff   = newQty - oldQty;
+    if (diff === 0) return true;
+    DB.update(d => {
+      if (!d.productStocks)  d.productStocks  = [];
+      if (!d.stockMovements) d.stockMovements = [];
+      const entry = d.productStocks.find(ps => ps.productId === productId && ps.almoxarifadoId === almoxId);
+      if (entry) entry.qty = newQty;
+      else d.productStocks.push({ productId, almoxarifadoId: almoxId, qty: newQty });
+      d.stockMovements.push({
+        id: uid(), ts: new Date().toISOString(), type: 'ajuste',
+        productId, productName: p.name,
+        fromAlmoxId: diff < 0 ? almoxId : null, fromAlmoxName: diff < 0 ? a.name : null,
+        toAlmoxId:   diff > 0 ? almoxId : null, toAlmoxName:   diff > 0 ? a.name : null,
+        qty: Math.abs(diff), note
+      });
+      this._syncTotal(d, productId);
+    });
+    return true;
   }
 };
 
@@ -395,10 +555,10 @@ const Products = {
     DB.update(d => {
       const idx = d.products.findIndex(x => x.id === p.id);
       if (idx >= 0) {
-        // preserve sold/initialStock
         d.products[idx] = { ...d.products[idx], ...p };
       } else {
-        d.products.push({ ...p, id: uid(), soldQty: 0, initialStock: p.stock });
+        const newId = uid();
+        d.products.push({ ...p, id: newId, soldQty: 0, initialStock: 0, stock: 0 });
       }
     });
     UI.renderProductList();
@@ -407,18 +567,9 @@ const Products = {
 
   delete(id) {
     if (!confirm('Excluir este produto?')) return;
-    DB.update(d => { d.products = d.products.filter(p => p.id !== id); });
-    UI.renderProductList();
-    UI.renderPDVGrid();
-  },
-
-  updateStock(id, newStock) {
     DB.update(d => {
-      const p = d.products.find(x => x.id === id);
-      if (!p) return;
-      const diff = newStock - p.stock;
-      p.stock = newStock;
-      if (diff > 0) p.initialStock = (p.initialStock || 0) + diff;
+      d.products     = d.products.filter(p => p.id !== id);
+      d.productStocks = (d.productStocks || []).filter(ps => ps.productId !== id);
     });
     UI.renderProductList();
     UI.renderPDVGrid();
@@ -427,11 +578,17 @@ const Products = {
   deduct(id, qty) {
     DB.update(d => {
       const p = d.products.find(x => x.id === id);
-      if (p) { p.stock = Math.max(0, p.stock - qty); p.soldQty = (p.soldQty || 0) + qty; }
+      if (!p) return;
+      if (p.activeAlmoxId) {
+        const entry = (d.productStocks || []).find(ps => ps.productId === id && ps.almoxarifadoId === p.activeAlmoxId);
+        if (entry) entry.qty = Math.max(0, entry.qty - qty);
+      }
+      p.stock   = Math.max(0, p.stock - qty);
+      p.soldQty = (p.soldQty || 0) + qty;
     });
   },
 
-  importCSV(text) {
+  importCSV(text, almoxId) {
     // Formato normalizado (com cabeçalho):
     //   Nome;Categoria;Compra;Venda;Estoque
     // • Separador: ponto-e-vírgula
@@ -443,7 +600,7 @@ const Products = {
     const toFloat = v => parseFloat(String(v || '0').replace(',', '.')) || 0;
     const allCats = Categories.all();
 
-    for (let i = 1; i < lines.length; i++) {     // i=1: pula cabeçalho
+    for (let i = 1; i < lines.length; i++) {
       const cols = lines[i].split(';');
       if (cols.length < 4) continue;
 
@@ -453,7 +610,7 @@ const Products = {
       const category = matched ? matched.name : (allCats.find(c => c.name.toLowerCase() === 'outro')?.name || 'Outro');
       const costPrice = toFloat(cols[2]);
       const price     = toFloat(cols[3]);
-      const stock     = parseInt(cols[4]) || 1;
+      const stock     = parseInt(cols[4]) || 0;
 
       if (!name || name.length < 2 || price <= 0) continue;
 
@@ -463,11 +620,29 @@ const Products = {
     }
 
     const toImport = Object.values(byName);
+    const almox    = almoxId ? Almoxarifados.byId(almoxId) : null;
+
     DB.update(d => {
+      if (!d.productStocks)  d.productStocks  = [];
+      if (!d.stockMovements) d.stockMovements = [];
       const existing = new Set(d.products.map(p => p.name.toLowerCase().trim()));
       toImport.forEach(p => {
-        if (!existing.has(p.name.toLowerCase())) {
-          d.products.push({ id: uid(), soldQty: 0, initialStock: p.stock, ...p });
+        if (existing.has(p.name.toLowerCase())) return;
+        const newId = uid();
+        d.products.push({
+          id: newId, soldQty: 0, initialStock: p.stock, stock: p.stock,
+          activeAlmoxId: almoxId || null,
+          ...p
+        });
+        if (almoxId && p.stock > 0) {
+          d.productStocks.push({ productId: newId, almoxarifadoId: almoxId, qty: p.stock });
+          d.stockMovements.push({
+            id: uid(), ts: new Date().toISOString(), type: 'entrada',
+            productId: newId, productName: p.name,
+            fromAlmoxId: null, fromAlmoxName: null,
+            toAlmoxId: almoxId, toAlmoxName: almox?.name || '',
+            qty: p.stock, note: 'Importação CSV'
+          });
         }
       });
     });
@@ -483,10 +658,17 @@ const Sales = {
 
   addToCart(pid) {
     const p = Products.byId(pid);
-    if (!p || p.stock <= 0) { UI.toast('Produto sem estoque!', 'danger'); return; }
-    const item = this.cart.find(i => i.pid === pid);
+    if (!p) return;
+    // Verifica estoque no almoxarifado ativo; fallback no total
+    const activeStock = p.activeAlmoxId ? Stock.qty(pid, p.activeAlmoxId) : p.stock;
+    if (activeStock <= 0) {
+      const almoxName = p.activeAlmoxId ? (Almoxarifados.byId(p.activeAlmoxId)?.name || 'almoxarifado ativo') : 'estoque';
+      UI.toast(`Sem estoque no ${almoxName}!`, 'danger');
+      return;
+    }
+    const item   = this.cart.find(i => i.pid === pid);
     const inCart = item ? item.qty : 0;
-    if (inCart >= p.stock) { UI.toast('Estoque insuficiente!', 'danger'); return; }
+    if (inCart >= activeStock) { UI.toast('Estoque insuficiente!', 'danger'); return; }
     if (item) item.qty++;
     else this.cart.push({ pid, name: p.name, price: p.price, qty: 1 });
     this._renderCart();
@@ -527,26 +709,37 @@ const Sales = {
     const items = this.cart.map(i => ({ ...i }));
     const total = this.total();
 
-    // Atualiza estoque em um único DB.update para evitar race condition
     DB.update(d => {
+      if (!d.stockMovements) d.stockMovements = [];
       items.forEach(item => {
         const p = d.products.find(x => x.id === item.pid);
-        if (p) {
-          p.stock   = Math.max(0, p.stock - item.qty);
-          p.soldQty = (p.soldQty || 0) + item.qty;
+        if (!p) return;
+        if (p.activeAlmoxId) {
+          const entry = (d.productStocks || []).find(ps => ps.productId === item.pid && ps.almoxarifadoId === p.activeAlmoxId);
+          if (entry) entry.qty = Math.max(0, entry.qty - item.qty);
+          const almox = (d.almoxarifados || []).find(a => a.id === p.activeAlmoxId);
+          d.stockMovements.push({
+            id: uid(), ts: new Date().toISOString(), type: 'venda',
+            productId: item.pid, productName: item.name,
+            fromAlmoxId: p.activeAlmoxId, fromAlmoxName: almox?.name || '',
+            toAlmoxId: null, toAlmoxName: null,
+            qty: item.qty, note: ''
+          });
         }
+        p.stock   = Math.max(0, p.stock - item.qty);
+        p.soldQty = (p.soldQty || 0) + item.qty;
       });
       d.sales.push({ id: uid(), ts: new Date().toISOString(), items, total });
     });
 
-    // Sync imediato para SQLite (cancela debounce pendente)
     clearTimeout(DB._syncTimer);
     DB._sync();
 
     UI.toast(`Venda de ${fmt(total)} confirmada!`, 'success');
     this.clearCart();
     UI.renderPDVGrid();
-    if (UI.currentTab === 'caixa') UI.renderCaixa();
+    if (UI.currentTab === 'caixa')   UI.renderCaixa();
+    if (UI.currentTab === 'estoque') UI.renderEstoque();
   }
 };
 
@@ -680,13 +873,16 @@ const Reports = {
     if (!salesSection) salesSection = '\n_Nenhuma venda registrada nesta sessão._\n';
 
     // ── Estoque ──
-    const prods = Products.all().sort((a,b) => (a.category||'').localeCompare(b.category||'')||a.name.localeCompare(b.name));
-    let stockSection = `| Produto | Categoria | Estoque Inicial | Vendido | Estoque Final | Status |\n`;
-    stockSection    += `|---------|-----------|----------------:|--------:|--------------:|--------|\n`;
+    const prods   = Products.all().sort((a,b) => (a.category||'').localeCompare(b.category||'')||a.name.localeCompare(b.name));
+    const almoxes = Almoxarifados.all();
+    const almoxHeaders = almoxes.map(a => ` ${a.name} `).join('|');
+    let stockSection = `| Produto | Categoria |${almoxHeaders}| Total | Vendido | Status |\n`;
+    const sepAlmox   = almoxes.map(() => `----:`).join('|');
+    stockSection    += `|---------|-----------|${sepAlmox}|------:|--------:|--------|\n`;
     prods.forEach(p => {
-      const initial = p.initialStock ?? p.stock;
-      const status  = p.stock <= 0 ? '⚠ Esgotado' : p.stock <= 3 ? '🔶 Baixo' : '✅ OK';
-      stockSection += `| ${p.name} | ${p.category || '-'} | ${initial} | ${p.soldQty || 0} | ${p.stock} | ${status} |\n`;
+      const almoxCols = almoxes.map(a => ` ${Stock.qty(p.id, a.id)} `).join('|');
+      const status    = p.stock <= 0 ? '⚠ Esgotado' : p.stock <= 3 ? '🔶 Baixo' : '✅ OK';
+      stockSection += `| ${p.name} | ${p.category || '-'} |${almoxCols}| ${p.stock} | ${p.soldQty || 0} | ${status} |\n`;
     });
 
     // ── Custos fixos ──
@@ -885,11 +1081,12 @@ const UI = {
     document.getElementById(`tab-${tab}`).classList.add('active');
     document.querySelector(`[data-tab="${tab}"]`).classList.add('active');
     this.currentTab = tab;
-    if (tab === 'estoque') Charts.render();
-    if (tab === 'caixa')   this.renderCaixa();
-    if (tab === 'lucro')   this.renderLucro();
-    if (tab === 'pdv')     this.renderPDVGrid();
-    if (tab === 'produtos') this.renderProductList();
+    if (tab === 'estoque')       this.renderEstoque();
+    if (tab === 'almoxarifados') this.renderAlmoxTab();
+    if (tab === 'caixa')         this.renderCaixa();
+    if (tab === 'lucro')         this.renderLucro();
+    if (tab === 'pdv')           this.renderPDVGrid();
+    if (tab === 'produtos')      this.renderProductList();
   },
 
   // ── PDV ──
@@ -926,14 +1123,19 @@ const UI = {
       const media = p.image
         ? `<img class="p-img" src="${p.image}" alt="">`
         : `<div class="p-emoji" style="color:${color}">${productIcon(p)}</div>`;
+      const activeStock = p.activeAlmoxId ? Stock.qty(p.id, p.activeAlmoxId) : p.stock;
+      const almoxName   = p.activeAlmoxId ? (Almoxarifados.byId(p.activeAlmoxId)?.name || '') : '';
+      const stockLabel  = activeStock <= 0
+        ? '⚠ Sem estoque'
+        : `${activeStock} un${almoxName ? ` · ${almoxName}` : ''}`;
       return `
-      <div class="product-card ${p.stock <= 0 ? 'out' : ''}"
+      <div class="product-card ${activeStock <= 0 ? 'out' : ''}"
            style="border-left:4px solid ${color}"
            onclick="Sales.addToCart('${p.id}')">
         <div class="p-media">${media}</div>
         <div class="p-name">${esc(p.name)}</div>
         <div class="p-price" style="color:${color}">${fmt(p.price)}</div>
-        <div class="p-stock">${p.stock <= 0 ? '⚠ Sem estoque' : `Estoque: ${p.stock}`}</div>
+        <div class="p-stock">${stockLabel}</div>
       </div>`;
     }).join('');
   },
@@ -1053,34 +1255,51 @@ const UI = {
       return `<th class="sortable-th${active ? ' sort-active' : ''}" onclick="UI._sortProd('${key}')">${label}${arrow}</th>`;
     };
 
+    const allAlmox = Almoxarifados.all();
+
     el.innerHTML = `<table class="data-table">
       <thead><tr>
         ${th('#','rank')}${th('Produto','name')}${th('Categoria','category')}
         ${th('Compra','costPrice')}${th('Venda','price')}
-        ${th('Estoque','stock')}${th('Vendido','soldQty')}
-        <th>Status</th><th>Ações</th>
+        ${th('Total','stock')}${th('Vendido','soldQty')}
+        <th>Almox. Venda</th><th>Status</th><th>Ações</th>
       </tr></thead>
       <tbody>
         ${sorted.map(p => {
-          const status = p.stock <= 0 ? ['badge-out','Sem estoque']
-                       : p.stock <= 3 ? ['badge-low','Baixo']
+          const activeStock = p.activeAlmoxId ? Stock.qty(p.id, p.activeAlmoxId) : p.stock;
+          const status = activeStock <= 0 ? ['badge-out','Sem estoque']
+                       : activeStock <= 3 ? ['badge-low','Baixo']
                        : ['badge-ok','OK'];
-          const color = productColor(p);
-          const catObj = Categories.byName(p.category);
+          const color    = productColor(p);
+          const catObj   = Categories.byName(p.category);
           const catIcon  = catObj ? catObj.icon  : '📦';
           const catColor = catObj ? catObj.color : '#4f46e5';
+          const almoxName = p.activeAlmoxId ? (Almoxarifados.byId(p.activeAlmoxId)?.name || '—') : '—';
+          // Mini-breakdown por almoxarifado
+          const stocks = Stock.forProduct(p.id);
+          const breakdown = stocks.length > 0
+            ? stocks.map(ps => {
+                const a = Almoxarifados.byId(ps.almoxarifadoId);
+                return `<span style="font-size:0.72rem;color:var(--muted)">${a ? a.name : ps.almoxarifadoId}: ${ps.qty}</span>`;
+              }).join(' · ')
+            : `<span style="font-size:0.72rem;color:var(--muted)">—</span>`;
           return `<tr>
             <td style="color:var(--muted);font-size:0.8rem;text-align:center">${p.rank ?? 999}</td>
-            <td><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${color};margin-right:6px;vertical-align:middle"></span>${esc(p.name)}</td>
+            <td>
+              <span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${color};margin-right:6px;vertical-align:middle"></span>
+              ${esc(p.name)}
+              <div>${breakdown}</div>
+            </td>
             <td><span class="cat-badge" style="--cat-color:${catColor}">${catIcon} ${esc(p.category || '-')}</span></td>
             <td>${p.costPrice ? fmt(p.costPrice) : '—'}</td>
             <td>${fmt(p.price)}</td>
             <td>${p.stock}</td>
             <td>${p.soldQty || 0}</td>
+            <td style="font-size:0.8rem">${esc(almoxName)}</td>
             <td><span class="badge ${status[0]}">${status[1]}</span></td>
             <td style="white-space:nowrap;display:flex;gap:0.4rem">
               <button class="action-btn ab-edit"   onclick="UI.showProductForm('${p.id}')">✏ Editar</button>
-              <button class="action-btn ab-stock"  onclick="UI.showStockModal('${p.id}')">📦</button>
+              <button class="action-btn ab-stock"  onclick="UI.showStockAlmoxModal('${p.id}')">📦</button>
               <button class="action-btn ab-delete" onclick="Products.delete('${p.id}')">🗑</button>
             </td>
           </tr>`;
@@ -1328,9 +1547,16 @@ const UI = {
   },
 
   showProductForm(id) {
-    const p = id ? Products.byId(id) : null;
-    const cats = Categories.all();
-    const pCatKey = (p?.category || '').toLowerCase().trim();
+    const p        = id ? Products.byId(id) : null;
+    const cats     = Categories.all();
+    const almoxes  = Almoxarifados.all();
+    const pCatKey  = (p?.category || '').toLowerCase().trim();
+    const almoxOpts = almoxes.map(a => {
+      const ti = Almoxarifados.typeInfo(a.type);
+      return `<option value="${a.id}" ${p?.activeAlmoxId === a.id ? 'selected' : ''}>${ti.icon} ${esc(a.name)}</option>`;
+    }).join('');
+
+    const isNew = !p;
     this.showModal(`
       <h2>${p ? 'Editar Produto' : 'Novo Produto'}</h2>
       <div class="form-group">
@@ -1346,9 +1572,29 @@ const UI = {
         <input id="pf-price" type="number" step="0.01" min="0" value="${p ? p.price : ''}">
       </div>
       <div class="form-group">
-        <label>Estoque inicial</label>
-        <input id="pf-stock" type="number" min="0" value="${p ? p.stock : '1'}">
+        <label>Almoxarifado de venda <span style="color:var(--muted);font-size:0.8rem">(de onde o PDV debita)</span></label>
+        <select id="pf-almox">
+          <option value="">— nenhum —</option>
+          ${almoxOpts}
+        </select>
       </div>
+      ${isNew ? `
+      <div class="form-row">
+        <div class="form-group">
+          <label>Estoque inicial (opcional)</label>
+          <input id="pf-stock" type="number" min="0" placeholder="0">
+        </div>
+        <div class="form-group">
+          <label>Almoxarifado de entrada</label>
+          <select id="pf-stock-almox">
+            <option value="">— mesmo da venda —</option>
+            ${almoxes.map(a => {
+              const ti = Almoxarifados.typeInfo(a.type);
+              return `<option value="${a.id}">${ti.icon} ${esc(a.name)}</option>`;
+            }).join('')}
+          </select>
+        </div>
+      </div>` : ''}
       <div class="form-group">
         <label>Categoria</label>
         <select id="pf-cat">
@@ -1372,59 +1618,96 @@ const UI = {
   },
 
   _saveProductForm(id) {
-    const name      = document.getElementById('pf-name').value.trim();
-    const costPrice = parseFloat(document.getElementById('pf-cost').value) || 0;
-    const price     = parseFloat(document.getElementById('pf-price').value);
-    const stock     = parseInt(document.getElementById('pf-stock').value);
-    const cat       = document.getElementById('pf-cat').value;
-    const rank      = parseInt(document.getElementById('pf-rank').value) || 999;
-    if (!name || isNaN(price) || price < 0 || isNaN(stock) || stock < 0) {
-      this.toast('Preencha todos os campos corretamente!', 'danger'); return;
+    const name         = document.getElementById('pf-name').value.trim();
+    const costPrice    = parseFloat(document.getElementById('pf-cost').value) || 0;
+    const price        = parseFloat(document.getElementById('pf-price').value);
+    const cat          = document.getElementById('pf-cat').value;
+    const rank         = parseInt(document.getElementById('pf-rank').value) || 999;
+    const activeAlmoxId = document.getElementById('pf-almox')?.value || null;
+
+    if (!name || isNaN(price) || price < 0) {
+      this.toast('Preencha nome e preço corretamente!', 'danger'); return;
     }
+
     const existing = id ? Products.byId(id) : null;
-    const file = document.getElementById('pf-image').files[0];
-    const base = existing ? { ...existing, name, costPrice, price, stock, category: cat, rank }
-                          : { name, costPrice, price, stock, category: cat, rank };
-    if (file) {
-      compressImage(file).then(img => {
-        Products.save({ ...base, image: img });
-        this.closeModal();
-        this.toast('Produto salvo!', 'success');
-      });
-    } else {
-      Products.save(base);
+    const file     = document.getElementById('pf-image').files[0];
+    const base     = existing
+      ? { ...existing, name, costPrice, price, category: cat, rank, activeAlmoxId: activeAlmoxId || existing.activeAlmoxId || null }
+      : { name, costPrice, price, category: cat, rank, activeAlmoxId: activeAlmoxId || null };
+
+    const doSave = (imgData) => {
+      const finalObj = imgData ? { ...base, image: imgData } : base;
+      Products.save(finalObj);
+
+      // Entrada de estoque inicial (apenas para novos produtos)
+      if (!id) {
+        const stockEl     = document.getElementById('pf-stock');
+        const stockAlmoxEl = document.getElementById('pf-stock-almox');
+        const qty         = stockEl ? (parseInt(stockEl.value) || 0) : 0;
+        const entAlmoxId  = stockAlmoxEl?.value || activeAlmoxId;
+        if (qty > 0 && entAlmoxId) {
+          // Precisa do ID real do produto recém-criado
+          const newProd = Products.all().find(p => p.name === name);
+          if (newProd) Stock.entrada(newProd.id, entAlmoxId, qty, 'Estoque inicial');
+        }
+      }
+
       this.closeModal();
       this.toast('Produto salvo!', 'success');
-    }
+    };
+
+    if (file) compressImage(file).then(doSave);
+    else doSave(null);
   },
 
-  showStockModal(id) {
+  showStockAlmoxModal(id) {
     const p = Products.byId(id);
     if (!p) return;
+    const almoxes = Almoxarifados.all();
+    const stocks  = Stock.forProduct(id);
+
+    const rows = almoxes.map(a => {
+      const ps  = stocks.find(s => s.almoxarifadoId === a.id);
+      const qty = ps ? ps.qty : 0;
+      const ti  = Almoxarifados.typeInfo(a.type);
+      const isActive = p.activeAlmoxId === a.id;
+      return `<tr>
+        <td>${ti.icon} ${esc(a.name)}${isActive ? ' <span style="font-size:0.7rem;color:var(--accent);font-weight:600">VENDA</span>' : ''}</td>
+        <td style="text-align:center;font-weight:600">${qty}</td>
+        <td style="white-space:nowrap;display:flex;gap:0.35rem;justify-content:flex-end">
+          <button class="action-btn ab-edit" onclick="UI.showEntradaModal('${id}','${a.id}')">+ Entrada</button>
+          <button class="action-btn ab-edit" onclick="UI.showAjusteModal('${id}','${a.id}')">✏ Ajuste</button>
+        </td>
+      </tr>`;
+    }).join('');
+
+    const noAlmox = almoxes.length === 0
+      ? `<p style="color:var(--muted)">Nenhum almoxarifado cadastrado. Crie um na aba <strong>Almoxarifados</strong>.</p>`
+      : '';
+
     this.showModal(`
-      <h2>📦 Atualizar Estoque</h2>
-      <p style="color:var(--muted);margin-bottom:1rem;font-size:0.875rem">${esc(p.name)}</p>
-      <p style="margin-bottom:0.75rem">Atual: <strong>${p.stock}</strong> &nbsp;|&nbsp; Inicial: ${p.initialStock || 0} &nbsp;|&nbsp; Vendido: ${p.soldQty || 0}</p>
-      <div class="form-group">
-        <label>Novo estoque</label>
-        <input id="sm-stock" type="number" min="0" value="${p.stock}">
-      </div>
-      <div class="modal-actions">
-        <button class="btn-cancel" onclick="UI.closeModal()">Cancelar</button>
-        <button class="btn-primary" onclick="UI._saveStock('${id}')">Atualizar</button>
+      <h2>📦 Estoque — ${esc(p.name)}</h2>
+      <p style="color:var(--muted);font-size:0.82rem;margin-bottom:1rem">
+        Total: <strong>${p.stock}</strong> &nbsp;|&nbsp; Vendido: ${p.soldQty || 0}
+      </p>
+      ${noAlmox}
+      ${almoxes.length > 0 ? `
+      <table class="data-table" style="margin-bottom:1rem">
+        <thead><tr><th>Almoxarifado</th><th style="text-align:center">Qtd</th><th></th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>` : ''}
+      <div class="modal-actions" style="gap:0.5rem;flex-wrap:wrap">
+        <button class="btn-cancel" onclick="UI.closeModal()">Fechar</button>
+        <button class="btn-secondary" onclick="UI.showTransferenciaModal('${id}')">⇄ Transferir</button>
       </div>`);
   },
 
-  _saveStock(id) {
-    const v = parseInt(document.getElementById('sm-stock').value);
-    if (isNaN(v) || v < 0) { this.toast('Valor inválido!', 'danger'); return; }
-    Products.updateStock(id, v);
-    this.closeModal();
-    this.toast('Estoque atualizado!', 'success');
-    if (this.currentTab === 'estoque') Charts.render();
-  },
-
   showImportCSV() {
+    const almoxes = Almoxarifados.all();
+    const almoxOpts = almoxes.map(a => {
+      const ti = Almoxarifados.typeInfo(a.type);
+      return `<option value="${a.id}">${ti.icon} ${esc(a.name)}</option>`;
+    }).join('');
     this.showModal(`
       <h2>⬆ Importar CSV</h2>
       <div class="alert alert-info" style="margin-bottom:1rem">
@@ -1439,6 +1722,15 @@ const UI = {
         <label>Arquivo CSV</label>
         <input id="csv-file" type="file" accept=".csv,.txt">
       </div>
+      ${almoxes.length > 0 ? `
+      <div class="form-group">
+        <label>Almoxarifado de destino do estoque</label>
+        <select id="csv-almox">
+          <option value="">— não definir agora —</option>
+          ${almoxOpts}
+        </select>
+        <p style="font-size:0.75rem;color:var(--muted);margin-top:0.25rem">O estoque do CSV será lançado neste almoxarifado como "Entrada".</p>
+      </div>` : ''}
       <div class="alert alert-warning">Produtos com nomes duplicados serão ignorados.</div>
       <div class="modal-actions">
         <button class="btn-cancel" onclick="UI.closeModal()">Cancelar</button>
@@ -1447,11 +1739,13 @@ const UI = {
   },
 
   _doImport() {
-    const file = document.getElementById('csv-file').files[0];
+    const file     = document.getElementById('csv-file').files[0];
+    const almoxSel = document.getElementById('csv-almox');
+    const almoxId  = almoxSel ? almoxSel.value : '';
     if (!file) { this.toast('Selecione um arquivo!', 'warning'); return; }
     const reader = new FileReader();
     reader.onload = e => {
-      const count = Products.importCSV(e.target.result);
+      const count = Products.importCSV(e.target.result, almoxId || null);
       this.closeModal();
       this.toast(`${count} produto(s) importado(s)!`, count > 0 ? 'success' : 'warning');
       this.renderProductList();
@@ -1578,6 +1872,376 @@ const UI = {
     this.showCategoryList();
   },
 
+  // ── ESTOQUE ──
+  renderEstoque() {
+    const el = document.getElementById('estoque-content');
+    if (!el) return;
+    const almoxes  = Almoxarifados.all();
+    const products = Products.all();
+    const data     = DB.get();
+
+    if (almoxes.length === 0) {
+      el.innerHTML = `<div class="empty-state">
+        <span class="es-icon">🏪</span>
+        Nenhum almoxarifado cadastrado.<br>Crie um na aba <strong>Almoxarifados</strong> para começar.
+      </div>`;
+      return;
+    }
+
+    // Cards resumo por almoxarifado
+    const cards = almoxes.map(a => {
+      const ti   = Almoxarifados.typeInfo(a.type);
+      const total = (data.productStocks || [])
+        .filter(ps => ps.almoxarifadoId === a.id)
+        .reduce((s, ps) => s + ps.qty, 0);
+      const prods = new Set((data.productStocks || []).filter(ps => ps.almoxarifadoId === a.id && ps.qty > 0).map(ps => ps.productId)).size;
+      return `<div class="stat-card">
+        <div class="sc-label">${ti.icon} ${esc(a.name)}</div>
+        <div class="sc-value sc-plain">${total} un</div>
+        <div style="font-size:0.75rem;color:var(--muted);margin-top:0.25rem">${prods} produto(s)</div>
+      </div>`;
+    }).join('');
+
+    // Tabela produto × almoxarifado
+    const sorted = [...products].sort((a, b) => (a.category || '').localeCompare(b.category || '') || a.name.localeCompare(b.name));
+
+    const headerCols = almoxes.map(a => `<th style="text-align:center">${esc(a.name)}</th>`).join('');
+    const rows = sorted.map(p => {
+      const cols = almoxes.map(a => {
+        const qty     = Stock.qty(p.id, a.id);
+        const isActive = p.activeAlmoxId === a.id;
+        const style   = isActive ? 'font-weight:700;color:var(--accent)' : qty === 0 ? 'color:var(--muted)' : '';
+        return `<td style="text-align:center;${style}">${qty > 0 || isActive ? qty : '—'}${isActive ? '*' : ''}</td>`;
+      }).join('');
+      const status = p.stock <= 0 ? ['badge-out','Esgotado'] : p.stock <= 3 ? ['badge-low','Baixo'] : ['badge-ok','OK'];
+      return `<tr>
+        <td>${esc(p.name)}</td>
+        <td><small style="color:var(--muted)">${esc(p.category||'-')}</small></td>
+        ${cols}
+        <td style="text-align:center;font-weight:600">${p.stock}</td>
+        <td style="text-align:center">${p.soldQty||0}</td>
+        <td><span class="badge ${status[0]}">${status[1]}</span></td>
+      </tr>`;
+    }).join('');
+
+    el.innerHTML = `
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem;flex-wrap:wrap;gap:0.5rem">
+        <div style="display:flex;gap:0.5rem;flex-wrap:wrap">
+          <button class="btn-primary" onclick="UI.showEntradaModal()">+ Entrada</button>
+          <button class="btn-secondary" onclick="UI.showTransferenciaModal()">⇄ Transferir</button>
+          <button class="btn-secondary" onclick="UI.showMovimentacoesModal()">📋 Movimentações</button>
+        </div>
+      </div>
+
+      <div class="cards-grid" style="margin-bottom:1.5rem">${cards}</div>
+
+      <div class="report-section">
+        <h3>Estoque por Produto e Almoxarifado</h3>
+        <p style="font-size:0.75rem;color:var(--muted);margin-bottom:0.75rem">* = almoxarifado de venda (PDV debita daqui)</p>
+        <div style="overflow-x:auto">
+          <table class="data-table">
+            <thead><tr>
+              <th>Produto</th><th>Categoria</th>
+              ${headerCols}
+              <th style="text-align:center">Total</th>
+              <th style="text-align:center">Vendido</th>
+              <th>Status</th>
+            </tr></thead>
+            <tbody>${rows || '<tr><td colspan="99" style="text-align:center;color:var(--muted);padding:1.5rem">Nenhum produto cadastrado.</td></tr>'}</tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="report-section" style="margin-top:1.5rem">
+        <h3>Gráfico de Estoque</h3>
+        <div class="chart-container"><canvas id="stock-chart"></canvas></div>
+      </div>`;
+
+    Charts.render();
+  },
+
+  // ── ALMOXARIFADOS TAB ──
+  renderAlmoxTab() {
+    const el = document.getElementById('almox-content');
+    if (!el) return;
+    const almoxes = Almoxarifados.all();
+    const data    = DB.get();
+
+    const rows = almoxes.map(a => {
+      const ti    = Almoxarifados.typeInfo(a.type);
+      const total = (data.productStocks || []).filter(ps => ps.almoxarifadoId === a.id).reduce((s, ps) => s + ps.qty, 0);
+      const prods = new Set((data.productStocks || []).filter(ps => ps.almoxarifadoId === a.id && ps.qty > 0).map(ps => ps.productId)).size;
+      return `<div style="display:flex;align-items:center;gap:0.75rem;padding:0.75rem 1rem;
+           background:var(--card);border:1px solid var(--border);border-radius:0.5rem;
+           border-left:4px solid var(--accent)">
+        <span style="font-size:1.4rem;flex-shrink:0">${ti.icon}</span>
+        <div style="flex:1">
+          <div style="font-weight:600">${esc(a.name)}</div>
+          <div style="font-size:0.78rem;color:var(--muted)">${ti.name} · ${prods} produto(s) · ${total} unidades</div>
+        </div>
+        <button class="action-btn ab-edit"   onclick="UI.showAlmoxForm('${a.id}')">✏ Editar</button>
+        <button class="action-btn ab-delete" onclick="Almoxarifados.delete('${a.id}')">🗑</button>
+      </div>`;
+    }).join('');
+
+    el.innerHTML = `
+      <div class="section-header" style="margin-bottom:1rem">
+        <h2>Almoxarifados</h2>
+        <button class="btn-primary" onclick="UI.showAlmoxForm()">+ Novo</button>
+      </div>
+      ${almoxes.length === 0
+        ? `<div class="empty-state"><span class="es-icon">🏪</span>Nenhum almoxarifado cadastrado.</div>`
+        : `<div style="display:flex;flex-direction:column;gap:0.5rem">${rows}</div>`}
+      <div style="margin-top:1.5rem">
+        <button class="btn-secondary" onclick="UI.showMovimentacoesModal()">📋 Ver histórico de movimentações</button>
+      </div>`;
+  },
+
+  showAlmoxList() {
+    this.renderAlmoxTab();
+  },
+
+  showAlmoxForm(id) {
+    const a = id ? Almoxarifados.byId(id) : null;
+    const typeOpts = ALMOX_TYPES.map(t =>
+      `<option value="${t.id}" ${a?.type === t.id ? 'selected' : ''}>${t.icon} ${t.name}</option>`
+    ).join('');
+    this.showModal(`
+      <h2>${a ? 'Editar Almoxarifado' : 'Novo Almoxarifado'}</h2>
+      <div class="form-group">
+        <label>Nome</label>
+        <input id="af-name" type="text" value="${a ? esc(a.name) : ''}" placeholder="Ex: Freezer Cerveja, Consignado">
+      </div>
+      <div class="form-group">
+        <label>Tipo</label>
+        <select id="af-type">${typeOpts}</select>
+      </div>
+      <div class="form-group">
+        <label>Ordem de exibição</label>
+        <input id="af-rank" type="number" min="1" max="999" value="${a?.rank ?? 999}">
+      </div>
+      <div class="modal-actions">
+        <button class="btn-cancel" onclick="UI.closeModal()">Cancelar</button>
+        <button class="btn-primary" onclick="UI._saveAlmoxForm('${id||''}')">Salvar</button>
+      </div>`);
+  },
+
+  _saveAlmoxForm(id) {
+    const name = document.getElementById('af-name').value.trim();
+    const type = document.getElementById('af-type').value;
+    const rank = parseInt(document.getElementById('af-rank').value) || 999;
+    if (!name) { this.toast('Informe o nome!', 'danger'); return; }
+    Almoxarifados.save({ id: id || ('almox-' + uid()), name, type, rank });
+    this.closeModal();
+    this.toast('Almoxarifado salvo!', 'success');
+    this.renderAlmoxTab();
+  },
+
+  showEntradaModal(productId, almoxId) {
+    const products = Products.all();
+    const almoxes  = Almoxarifados.all();
+    if (almoxes.length === 0) { this.toast('Crie um almoxarifado primeiro!', 'warning'); return; }
+
+    const prodOpts = products.map(p =>
+      `<option value="${p.id}" ${p.id === productId ? 'selected' : ''}>${esc(p.name)}</option>`
+    ).join('');
+    const almoxOpts = almoxes.map(a => {
+      const ti = Almoxarifados.typeInfo(a.type);
+      return `<option value="${a.id}" ${a.id === almoxId ? 'selected' : ''}>${ti.icon} ${esc(a.name)}</option>`;
+    }).join('');
+
+    this.showModal(`
+      <h2>+ Entrada de Estoque</h2>
+      <div class="form-group">
+        <label>Produto</label>
+        <select id="en-prod">${prodOpts}</select>
+      </div>
+      <div class="form-group">
+        <label>Almoxarifado de destino</label>
+        <select id="en-almox">${almoxOpts}</select>
+      </div>
+      <div class="form-group">
+        <label>Quantidade</label>
+        <input id="en-qty" type="number" min="1" value="1">
+      </div>
+      <div class="form-group">
+        <label>Observação (opcional)</label>
+        <input id="en-note" type="text" placeholder="Ex: Entrega fornecedor 01/04">
+      </div>
+      <div class="modal-actions">
+        <button class="btn-cancel" onclick="UI.closeModal()">Cancelar</button>
+        <button class="btn-primary" onclick="UI._saveEntrada()">Confirmar Entrada</button>
+      </div>`);
+  },
+
+  _saveEntrada() {
+    const pid   = document.getElementById('en-prod').value;
+    const aid   = document.getElementById('en-almox').value;
+    const qty   = parseInt(document.getElementById('en-qty').value);
+    const note  = document.getElementById('en-note').value.trim();
+    if (!pid || !aid || isNaN(qty) || qty <= 0) { this.toast('Preencha todos os campos!', 'danger'); return; }
+    const ok = Stock.entrada(pid, aid, qty, note);
+    if (!ok) { this.toast('Erro ao registrar entrada!', 'danger'); return; }
+    this.closeModal();
+    this.toast(`Entrada registrada!`, 'success');
+    this.renderProductList();
+    this.renderPDVGrid();
+    if (this.currentTab === 'estoque') this.renderEstoque();
+  },
+
+  showTransferenciaModal(productId) {
+    const products = Products.all();
+    const almoxes  = Almoxarifados.all();
+    if (almoxes.length < 2) { this.toast('Precisa de pelo menos 2 almoxarifados!', 'warning'); return; }
+
+    const prodOpts = products.map(p =>
+      `<option value="${p.id}" ${p.id === productId ? 'selected' : ''}>${esc(p.name)}</option>`
+    ).join('');
+    const almoxOpts = (sel) => almoxes.map(a => {
+      const ti = Almoxarifados.typeInfo(a.type);
+      return `<option value="${a.id}" ${a.id === sel ? 'selected' : ''}>${ti.icon} ${esc(a.name)}</option>`;
+    }).join('');
+
+    const firstId  = almoxes[0]?.id || '';
+    const secondId = almoxes[1]?.id || '';
+
+    this.showModal(`
+      <h2>⇄ Transferência de Estoque</h2>
+      <div class="form-group">
+        <label>Produto</label>
+        <select id="tr-prod" onchange="UI._updateTransfDisp()">${prodOpts}</select>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label>De (origem)</label>
+          <select id="tr-from" onchange="UI._updateTransfDisp()">${almoxOpts(firstId)}</select>
+          <p id="tr-from-disp" style="font-size:0.78rem;color:var(--muted);margin-top:0.25rem"></p>
+        </div>
+        <div class="form-group">
+          <label>Para (destino)</label>
+          <select id="tr-to">${almoxOpts(secondId)}</select>
+        </div>
+      </div>
+      <div class="form-group">
+        <label>Quantidade</label>
+        <input id="tr-qty" type="number" min="1" value="1">
+      </div>
+      <div class="modal-actions">
+        <button class="btn-cancel" onclick="UI.closeModal()">Cancelar</button>
+        <button class="btn-primary" onclick="UI._saveTransferencia()">Confirmar</button>
+      </div>`,
+      () => this._updateTransfDisp()
+    );
+  },
+
+  _updateTransfDisp() {
+    const pid = document.getElementById('tr-prod')?.value;
+    const aid = document.getElementById('tr-from')?.value;
+    const el  = document.getElementById('tr-from-disp');
+    if (!el || !pid || !aid) return;
+    const qty = Stock.qty(pid, aid);
+    el.textContent = `Disponível: ${qty} un`;
+  },
+
+  _saveTransferencia() {
+    const pid = document.getElementById('tr-prod').value;
+    const fid = document.getElementById('tr-from').value;
+    const tid = document.getElementById('tr-to').value;
+    const qty = parseInt(document.getElementById('tr-qty').value);
+    if (fid === tid) { this.toast('Origem e destino são iguais!', 'danger'); return; }
+    if (!pid || !fid || !tid || isNaN(qty) || qty <= 0) { this.toast('Preencha todos os campos!', 'danger'); return; }
+    const available = Stock.qty(pid, fid);
+    if (qty > available) { this.toast(`Estoque insuficiente na origem (${available} un)!`, 'danger'); return; }
+    const ok = Stock.transferir(pid, fid, tid, qty);
+    if (!ok) { this.toast('Erro na transferência!', 'danger'); return; }
+    this.closeModal();
+    this.toast('Transferência realizada!', 'success');
+    this.renderProductList();
+    this.renderPDVGrid();
+    if (this.currentTab === 'estoque') this.renderEstoque();
+  },
+
+  showAjusteModal(productId, almoxId) {
+    const p = Products.byId(productId);
+    const a = Almoxarifados.byId(almoxId);
+    if (!p || !a) return;
+    const current = Stock.qty(productId, almoxId);
+    this.showModal(`
+      <h2>✏ Ajuste de Estoque</h2>
+      <p style="color:var(--muted);font-size:0.82rem;margin-bottom:1rem">${esc(p.name)} — ${esc(a.name)}</p>
+      <div class="form-group">
+        <label>Quantidade atual</label>
+        <input id="aj-qty" type="number" min="0" value="${current}">
+      </div>
+      <div class="form-group">
+        <label>Motivo do ajuste (opcional)</label>
+        <input id="aj-note" type="text" placeholder="Ex: Contagem física, perda, devolução">
+      </div>
+      <div class="modal-actions">
+        <button class="btn-cancel" onclick="UI.closeModal()">Cancelar</button>
+        <button class="btn-primary" onclick="UI._saveAjuste('${productId}','${almoxId}')">Confirmar</button>
+      </div>`);
+  },
+
+  _saveAjuste(productId, almoxId) {
+    const newQty = parseInt(document.getElementById('aj-qty').value);
+    const note   = document.getElementById('aj-note').value.trim() || 'Ajuste manual';
+    if (isNaN(newQty) || newQty < 0) { this.toast('Quantidade inválida!', 'danger'); return; }
+    Stock.ajustar(productId, almoxId, newQty, note);
+    this.closeModal();
+    this.toast('Estoque ajustado!', 'success');
+    this.renderProductList();
+    this.renderPDVGrid();
+    if (this.currentTab === 'estoque') this.renderEstoque();
+  },
+
+  showMovimentacoesModal() {
+    const data      = DB.get();
+    const movements = (data.stockMovements || []).slice(0, 200); // últimas 200
+
+    const typeLabel = {
+      entrada:       { icon: '⬇', label: 'Entrada',       cls: 'badge-ok' },
+      transferencia: { icon: '⇄', label: 'Transferência', cls: 'badge-low' },
+      venda:         { icon: '🛒', label: 'Venda',         cls: 'badge-out' },
+      ajuste:        { icon: '✏', label: 'Ajuste',        cls: '' },
+    };
+
+    const rows = movements.map(m => {
+      const tl   = typeLabel[m.type] || { icon: '•', label: m.type, cls: '' };
+      const date = new Date(m.ts).toLocaleString('pt-BR', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' });
+      const flow = m.type === 'venda'
+        ? `<span style="color:var(--muted)">${m.fromAlmoxName || '—'} → PDV</span>`
+        : m.type === 'entrada'
+        ? `<span style="color:var(--muted)">Fornecedor → ${m.toAlmoxName || '—'}</span>`
+        : `<span style="color:var(--muted)">${m.fromAlmoxName || '—'} → ${m.toAlmoxName || '—'}</span>`;
+      return `<tr>
+        <td style="color:var(--muted);font-size:0.78rem">${date}</td>
+        <td><span class="badge ${tl.cls}" style="font-size:0.72rem">${tl.icon} ${tl.label}</span></td>
+        <td>${esc(m.productName)}</td>
+        <td style="text-align:center;font-weight:600">${m.qty}</td>
+        <td>${flow}</td>
+        <td style="color:var(--muted);font-size:0.78rem">${esc(m.note||'')}</td>
+      </tr>`;
+    }).join('');
+
+    this.showModal(`
+      <h2>📋 Histórico de Movimentações</h2>
+      ${movements.length === 0
+        ? '<p style="color:var(--muted)">Nenhuma movimentação registrada.</p>'
+        : `<div style="overflow-x:auto;max-height:60vh;overflow-y:auto">
+            <table class="data-table" style="font-size:0.82rem">
+              <thead><tr>
+                <th>Data/Hora</th><th>Tipo</th><th>Produto</th>
+                <th style="text-align:center">Qtd</th><th>Fluxo</th><th>Obs.</th>
+              </tr></thead>
+              <tbody>${rows}</tbody>
+            </table>
+          </div>`}
+      <div class="modal-actions">
+        <button class="btn-primary" onclick="UI.closeModal()">Fechar</button>
+      </div>`);
+  },
+
   // ── MODAL helpers ──
   showModal(html, afterRender) {
     document.getElementById('modal-content').innerHTML = html;
@@ -1608,9 +2272,33 @@ const UI = {
 // INIT
 // ─────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', async () => {
-  // Tenta carregar do servidor SQLite; se falhar, usa localStorage
   const fromServer = await DB.loadFromServer();
   if (!fromServer) {
+    // Migração localStorage: se não houver almoxarifados, cria "Geral" e migra stock
+    const d = DB.get();
+    if ((!d.almoxarifados || d.almoxarifados.length === 0) && d.products && d.products.some(p => (p.stock || 0) > 0)) {
+      DB.update(state => {
+        if (!state.almoxarifados)  state.almoxarifados  = [];
+        if (!state.productStocks)  state.productStocks  = [];
+        if (!state.stockMovements) state.stockMovements = [];
+        const almoxId = 'almox-geral';
+        state.almoxarifados.push({ id: almoxId, name: 'Geral', type: 'outro', rank: 1 });
+        state.products.forEach(p => {
+          if ((p.stock || 0) > 0) {
+            state.productStocks.push({ productId: p.id, almoxarifadoId: almoxId, qty: p.stock });
+            state.stockMovements.push({
+              id: uid(), ts: new Date().toISOString(), type: 'entrada',
+              productId: p.id, productName: p.name,
+              fromAlmoxId: null, fromAlmoxName: null,
+              toAlmoxId: almoxId, toAlmoxName: 'Geral',
+              qty: p.stock, note: 'Migração inicial'
+            });
+          }
+          if (!p.activeAlmoxId) p.activeAlmoxId = almoxId;
+        });
+      });
+      console.info('Migração localStorage: almoxarifado "Geral" criado');
+    }
     console.info('Servidor indisponível — usando localStorage');
   }
 

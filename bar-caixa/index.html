@@ -18,6 +18,7 @@
     <button class="tab-btn active" data-tab="fichas" onclick="UI.showTab('fichas')">🎫 Fichas</button>
     <button class="tab-btn" data-tab="pdv" onclick="UI.showTab('pdv')">🛒 PDV</button>
     <button class="tab-btn" data-tab="produtos" onclick="UI.showTab('produtos')">📦 Produtos</button>
+    <button class="tab-btn" data-tab="almoxarifados" onclick="UI.showTab('almoxarifados')">🏪 Almoxarifados</button>
     <button class="tab-btn" data-tab="estoque" onclick="UI.showTab('estoque')">📊 Estoque</button>
     <button class="tab-btn" data-tab="caixa" onclick="UI.showTab('caixa')">💰 Caixa</button>
     <button class="tab-btn" data-tab="lucro" onclick="UI.showTab('lucro')">📈 Lucro</button>
@@ -98,12 +99,14 @@
       <div id="produtos-list"></div>
     </section>
 
+    <!-- ALMOXARIFADOS -->
+    <section id="tab-almoxarifados" class="tab-content">
+      <div id="almox-content"></div>
+    </section>
+
     <!-- ESTOQUE -->
     <section id="tab-estoque" class="tab-content">
-      <h2>Estoque Visual</h2>
-      <div class="chart-container">
-        <canvas id="stock-chart"></canvas>
-      </div>
+      <div id="estoque-content"></div>
     </section>
 
     <!-- CAIXA -->

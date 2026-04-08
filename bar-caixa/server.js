@@ -10,11 +10,13 @@ const db = new Database(path.join(__dirname, 'bar-caixa.db'));
 db.pragma('journal_mode = WAL');
 db.pragma('foreign_keys = ON');
 
-// Migrações: adiciona colunas novas sem quebrar banco existente
-try { db.exec(`ALTER TABLE products ADD COLUMN rank       INTEGER NOT NULL DEFAULT 999`); } catch {}
-try { db.exec(`ALTER TABLE products ADD COLUMN image      TEXT`);                          } catch {}
-try { db.exec(`ALTER TABLE products ADD COLUMN cost_price REAL NOT NULL DEFAULT 0`);       } catch {}
+// ── Migrações de colunas novas (seguras se já existirem) ──
+try { db.exec(`ALTER TABLE products ADD COLUMN rank           INTEGER NOT NULL DEFAULT 999`); } catch {}
+try { db.exec(`ALTER TABLE products ADD COLUMN image          TEXT`);                          } catch {}
+try { db.exec(`ALTER TABLE products ADD COLUMN cost_price     REAL NOT NULL DEFAULT 0`);       } catch {}
+try { db.exec(`ALTER TABLE products ADD COLUMN active_almox_id TEXT`);                         } catch {}
 
+// ── Criação de tabelas ──
 db.exec(`
   CREATE TABLE IF NOT EXISTS settings (
     key   TEXT PRIMARY KEY,
@@ -22,16 +24,47 @@ db.exec(`
   );
 
   CREATE TABLE IF NOT EXISTS products (
-    id            TEXT PRIMARY KEY,
-    name          TEXT NOT NULL,
-    price         REAL NOT NULL DEFAULT 0,
-    cost_price    REAL NOT NULL DEFAULT 0,
-    stock         INTEGER NOT NULL DEFAULT 0,
-    initial_stock INTEGER NOT NULL DEFAULT 0,
-    sold_qty      INTEGER NOT NULL DEFAULT 0,
-    category      TEXT NOT NULL DEFAULT 'outro',
-    sku           TEXT NOT NULL DEFAULT '',
-    rank          INTEGER NOT NULL DEFAULT 999
+    id              TEXT PRIMARY KEY,
+    name            TEXT NOT NULL,
+    price           REAL NOT NULL DEFAULT 0,
+    cost_price      REAL NOT NULL DEFAULT 0,
+    stock           INTEGER NOT NULL DEFAULT 0,
+    initial_stock   INTEGER NOT NULL DEFAULT 0,
+    sold_qty        INTEGER NOT NULL DEFAULT 0,
+    category        TEXT NOT NULL DEFAULT 'outro',
+    sku             TEXT NOT NULL DEFAULT '',
+    rank            INTEGER NOT NULL DEFAULT 999,
+    active_almox_id TEXT
+  );
+
+  CREATE TABLE IF NOT EXISTS almoxarifados (
+    id   TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    type TEXT NOT NULL DEFAULT 'outro',
+    rank INTEGER NOT NULL DEFAULT 999
+  );
+
+  CREATE TABLE IF NOT EXISTS product_stocks (
+    product_id      TEXT NOT NULL,
+    almoxarifado_id TEXT NOT NULL,
+    qty             INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (product_id, almoxarifado_id),
+    FOREIGN KEY (product_id)      REFERENCES products(id)      ON DELETE CASCADE,
+    FOREIGN KEY (almoxarifado_id) REFERENCES almoxarifados(id) ON DELETE CASCADE
+  );
+
+  CREATE TABLE IF NOT EXISTS stock_movements (
+    id              TEXT PRIMARY KEY,
+    ts              TEXT NOT NULL,
+    type            TEXT NOT NULL,
+    product_id      TEXT NOT NULL,
+    product_name    TEXT NOT NULL,
+    from_almox_id   TEXT,
+    from_almox_name TEXT,
+    to_almox_id     TEXT,
+    to_almox_name   TEXT,
+    qty             INTEGER NOT NULL,
+    note            TEXT NOT NULL DEFAULT ''
   );
 
   CREATE TABLE IF NOT EXISTS token_sales (
@@ -58,20 +91,37 @@ db.exec(`
   );
 
   CREATE TABLE IF NOT EXISTS cash_register_sessions (
-    id         TEXT PRIMARY KEY,
-    opened_at  TEXT NOT NULL,
-    closed_at  TEXT,
-    summary    TEXT
+    id        TEXT PRIMARY KEY,
+    opened_at TEXT NOT NULL,
+    closed_at TEXT,
+    summary   TEXT
   );
 
-  -- índices úteis para relatórios
   CREATE INDEX IF NOT EXISTS idx_token_sales_ts ON token_sales(ts);
   CREATE INDEX IF NOT EXISTS idx_sales_ts       ON sales(ts);
   CREATE INDEX IF NOT EXISTS idx_sale_items_sid ON sale_items(sale_id);
+  CREATE INDEX IF NOT EXISTS idx_ps_product     ON product_stocks(product_id);
+  CREATE INDEX IF NOT EXISTS idx_sm_ts          ON stock_movements(ts);
 `);
 
+// ── Migração inicial: move stock existente para almoxarifado "Geral" ──
+{
+  const hasAlmox = db.prepare('SELECT COUNT(*) as n FROM almoxarifados').get().n;
+  if (!hasAlmox) {
+    db.transaction(() => {
+      const almoxId = 'almox-geral';
+      db.prepare('INSERT OR IGNORE INTO almoxarifados (id, name, type, rank) VALUES (?, ?, ?, ?)').run(almoxId, 'Geral', 'outro', 1);
+      const prods = db.prepare('SELECT id, stock FROM products WHERE stock > 0').all();
+      const ins   = db.prepare('INSERT OR IGNORE INTO product_stocks (product_id, almoxarifado_id, qty) VALUES (?, ?, ?)');
+      prods.forEach(p => ins.run(p.id, almoxId, p.stock));
+      db.prepare("UPDATE products SET active_almox_id = ? WHERE active_almox_id IS NULL OR active_almox_id = ''").run(almoxId);
+    })();
+    console.log('✅ Migração: estoque existente movido para almoxarifado "Geral"');
+  }
+}
+
 // ─────────────────────────────────────────────
-// Statements preparados (reutilizados)
+// Statements preparados
 // ─────────────────────────────────────────────
 const stmts = {
   // settings
@@ -80,12 +130,35 @@ const stmts = {
 
   // products
   upsertProduct : db.prepare(`
-    INSERT OR REPLACE INTO products (id, name, price, cost_price, stock, initial_stock, sold_qty, category, sku, rank, image)
-    VALUES (@id, @name, @price, @cost_price, @stock, @initial_stock, @sold_qty, @category, @sku, @rank, @image)
+    INSERT OR REPLACE INTO products
+      (id, name, price, cost_price, stock, initial_stock, sold_qty, category, sku, rank, image, active_almox_id)
+    VALUES
+      (@id, @name, @price, @cost_price, @stock, @initial_stock, @sold_qty, @category, @sku, @rank, @image, @active_almox_id)
   `),
   allProductIds : db.prepare('SELECT id FROM products'),
   deleteProduct : db.prepare('DELETE FROM products WHERE id = ?'),
   allProducts   : db.prepare('SELECT * FROM products'),
+
+  // almoxarifados
+  upsertAlmox   : db.prepare('INSERT OR REPLACE INTO almoxarifados (id, name, type, rank) VALUES (@id, @name, @type, @rank)'),
+  allAlmoxIds   : db.prepare('SELECT id FROM almoxarifados'),
+  deleteAlmox   : db.prepare('DELETE FROM almoxarifados WHERE id = ?'),
+  allAlmox      : db.prepare('SELECT * FROM almoxarifados ORDER BY rank, name'),
+
+  // product_stocks
+  upsertPStock  : db.prepare('INSERT OR REPLACE INTO product_stocks (product_id, almoxarifado_id, qty) VALUES (@product_id, @almoxarifado_id, @qty)'),
+  allPStockKeys : db.prepare('SELECT product_id, almoxarifado_id FROM product_stocks'),
+  deletePStock  : db.prepare('DELETE FROM product_stocks WHERE product_id = ? AND almoxarifado_id = ?'),
+  allPStocks    : db.prepare('SELECT product_id as productId, almoxarifado_id as almoxarifadoId, qty FROM product_stocks'),
+
+  // stock_movements (insert-only: histórico imutável)
+  insertMovement: db.prepare(`
+    INSERT OR IGNORE INTO stock_movements
+      (id, ts, type, product_id, product_name, from_almox_id, from_almox_name, to_almox_id, to_almox_name, qty, note)
+    VALUES
+      (@id, @ts, @type, @product_id, @product_name, @from_almox_id, @from_almox_name, @to_almox_id, @to_almox_name, @qty, @note)
+  `),
+  allMovements  : db.prepare('SELECT * FROM stock_movements ORDER BY ts DESC LIMIT 1000'),
 
   // token_sales
   insertToken   : db.prepare('INSERT OR IGNORE INTO token_sales (id, ts, amount, method, denoms) VALUES (@id, @ts, @amount, @method, @denoms)'),
@@ -100,7 +173,6 @@ const stmts = {
   allSales      : db.prepare('SELECT * FROM sales'),
   insertItem    : db.prepare('INSERT INTO sale_items (sale_id, pid, name, price, qty) VALUES (@sale_id, @pid, @name, @price, @qty)'),
   itemsBySale   : db.prepare('SELECT * FROM sale_items WHERE sale_id = ?'),
-  countItems    : db.prepare('SELECT COUNT(*) as n FROM sale_items WHERE sale_id = ?'),
 
   // cash register
   upsertSession : db.prepare(`
@@ -112,7 +184,7 @@ const stmts = {
 };
 
 // ─────────────────────────────────────────────
-// Leitura do estado completo do SQLite → JSON
+// Leitura do estado completo → JSON
 // ─────────────────────────────────────────────
 function readState() {
   const settings = {};
@@ -120,10 +192,25 @@ function readState() {
 
   const categories = settings.categories_json ? JSON.parse(settings.categories_json) : [];
 
+  const almoxarifados = stmts.allAlmox.all().map(a => ({
+    id: a.id, name: a.name, type: a.type, rank: a.rank
+  }));
+
+  const productStocks = stmts.allPStocks.all(); // { productId, almoxarifadoId, qty }
+
+  const stockMovements = stmts.allMovements.all().map(m => ({
+    id: m.id, ts: m.ts, type: m.type,
+    productId: m.product_id, productName: m.product_name,
+    fromAlmoxId: m.from_almox_id   || null, fromAlmoxName: m.from_almox_name || null,
+    toAlmoxId:   m.to_almox_id     || null, toAlmoxName:   m.to_almox_name   || null,
+    qty: m.qty, note: m.note || ''
+  }));
+
   const products = stmts.allProducts.all().map(p => ({
-    id: p.id, name: p.name, price: p.price, costPrice: p.cost_price ?? 0, stock: p.stock,
-    initialStock: p.initial_stock, soldQty: p.sold_qty,
-    category: p.category, sku: p.sku, rank: p.rank ?? 999, image: p.image || null
+    id: p.id, name: p.name, price: p.price, costPrice: p.cost_price ?? 0,
+    stock: p.stock, initialStock: p.initial_stock, soldQty: p.sold_qty,
+    category: p.category, sku: p.sku, rank: p.rank ?? 999, image: p.image || null,
+    activeAlmoxId: p.active_almox_id || null
   }));
 
   const tokenSales = stmts.allTokens.all().map(t => ({
@@ -140,7 +227,7 @@ function readState() {
   }));
 
   const sessions = stmts.allSessions.all();
-  const open = sessions.find(s => !s.closed_at);
+  const open     = sessions.find(s => !s.closed_at);
 
   return {
     categories,
@@ -150,6 +237,9 @@ function readState() {
       pixName:   settings.pixName   || 'Bar Tradicao',
       pixCity:   settings.pixCity   || 'SAO PAULO'
     },
+    almoxarifados,
+    productStocks,
+    stockMovements,
     products,
     tokenSales,
     sales,
@@ -174,23 +264,57 @@ const persistState = db.transaction((state) => {
     stmts.upsertSetting.run('categories_json', JSON.stringify(state.categories));
   }
 
-  // ── products (upsert + remoção dos excluídos) ──
+  // ── almoxarifados ──
+  const existAlmox = new Set(stmts.allAlmoxIds.all().map(r => r.id));
+  const incomAlmox = new Set((state.almoxarifados || []).map(a => a.id));
+  existAlmox.forEach(id => { if (!incomAlmox.has(id)) stmts.deleteAlmox.run(id); });
+  (state.almoxarifados || []).forEach(a =>
+    stmts.upsertAlmox.run({ id: a.id, name: a.name, type: a.type || 'outro', rank: a.rank ?? 999 })
+  );
+
+  // ── products ──
   const existProds = new Set(stmts.allProductIds.all().map(r => r.id));
   const incomProds = new Set((state.products || []).map(p => p.id));
   existProds.forEach(id => { if (!incomProds.has(id)) stmts.deleteProduct.run(id); });
   (state.products || []).forEach(p =>
     stmts.upsertProduct.run({
-      id: p.id, name: p.name, price: p.price, cost_price: p.costPrice ?? 0, stock: p.stock,
-      initial_stock: p.initialStock ?? p.stock,
+      id: p.id, name: p.name, price: p.price, cost_price: p.costPrice ?? 0,
+      stock: p.stock ?? 0,
+      initial_stock: p.initialStock ?? p.stock ?? 0,
       sold_qty: p.soldQty ?? 0,
       category: p.category || 'outro',
       sku: p.sku || '',
       rank: p.rank ?? 999,
-      image: p.image || null
+      image: p.image || null,
+      active_almox_id: p.activeAlmoxId || null
     })
   );
 
-  // ── token_sales (insert novos + remove os que sumiram do estado — ex: fechamento) ──
+  // ── product_stocks: sincronização total ──
+  const existPsKeys = new Set(stmts.allPStockKeys.all().map(r => `${r.product_id}|${r.almoxarifado_id}`));
+  const incomPsKeys = new Set((state.productStocks || []).map(ps => `${ps.productId}|${ps.almoxarifadoId}`));
+  existPsKeys.forEach(key => {
+    if (!incomPsKeys.has(key)) {
+      const [pid, aid] = key.split('|');
+      stmts.deletePStock.run(pid, aid);
+    }
+  });
+  (state.productStocks || []).forEach(ps =>
+    stmts.upsertPStock.run({ product_id: ps.productId, almoxarifado_id: ps.almoxarifadoId, qty: ps.qty })
+  );
+
+  // ── stock_movements: insert-only (histórico imutável) ──
+  (state.stockMovements || []).forEach(m =>
+    stmts.insertMovement.run({
+      id: m.id, ts: m.ts, type: m.type,
+      product_id: m.productId, product_name: m.productName,
+      from_almox_id:   m.fromAlmoxId   || null, from_almox_name: m.fromAlmoxName || null,
+      to_almox_id:     m.toAlmoxId     || null, to_almox_name:   m.toAlmoxName   || null,
+      qty: m.qty, note: m.note || ''
+    })
+  );
+
+  // ── token_sales ──
   const existTokens = new Set(stmts.allTokenIds.all().map(r => r.id));
   const incomTokens = new Set((state.tokenSales || []).map(t => t.id));
   existTokens.forEach(id => { if (!incomTokens.has(id)) stmts.deleteToken.run(id); });
@@ -198,7 +322,7 @@ const persistState = db.transaction((state) => {
     stmts.insertToken.run({ id: t.id, ts: t.ts, amount: t.amount, method: t.method, denoms: JSON.stringify(t.denoms || {}) })
   );
 
-  // ── sales + sale_items (insert novos + remove os que sumiram) ──
+  // ── sales + sale_items ──
   const existSales = new Set(stmts.allSaleIds.all().map(r => r.id));
   const incomSales = new Set((state.sales || []).map(s => s.id));
   existSales.forEach(id => { if (!incomSales.has(id)) stmts.deleteSale.run(id); });
@@ -213,11 +337,9 @@ const persistState = db.transaction((state) => {
 
   // ── cash register ──
   if (state.cashRegister) {
-    // lucro acumulado
     if (state.cashRegister.accumulatedProfit !== undefined) {
       stmts.upsertSetting.run('accumulated_profit', String(state.cashRegister.accumulatedProfit));
     }
-    // sessão aberta
     const open = stmts.openSession.get();
     if (!open) {
       stmts.upsertSession.run({
@@ -227,7 +349,6 @@ const persistState = db.transaction((state) => {
         summary: null
       });
     }
-    // histórico (fechamentos anteriores)
     (state.cashRegister.history || []).forEach(h =>
       stmts.upsertSession.run({
         id: h.id,
@@ -244,17 +365,13 @@ const persistState = db.transaction((state) => {
 // ─────────────────────────────────────────────
 const app = express();
 app.use(express.json({ limit: '10mb' }));
-
-// Arquivos estáticos (index.html, app.js, styles.css)
 app.use(express.static(__dirname));
 
-// GET /api/state — frontend lê estado do banco
 app.get('/api/state', (_req, res) => {
   try { res.json(readState()); }
   catch (e) { console.error(e); res.status(500).json({ error: e.message }); }
 });
 
-// POST /api/state — frontend envia estado para persistir
 app.post('/api/state', (req, res) => {
   try {
     persistState(req.body);
@@ -265,7 +382,6 @@ app.post('/api/state', (req, res) => {
   }
 });
 
-// Relatório rápido via SQL (bônus — útil para debug)
 app.get('/api/report', (_req, res) => {
   try {
     const totalTokens = db.prepare(`SELECT COALESCE(SUM(amount),0) as v, method FROM token_sales GROUP BY method`).all();
@@ -274,7 +390,16 @@ app.get('/api/report', (_req, res) => {
       SELECT name, SUM(qty) as qty, SUM(price*qty) as total
       FROM sale_items GROUP BY name ORDER BY total DESC LIMIT 20
     `).all();
-    const estoque = db.prepare(`SELECT name, stock, initial_stock, sold_qty FROM products ORDER BY name`).all();
+    const estoque = db.prepare(`
+      SELECT p.name, p.sold_qty,
+        COALESCE(SUM(ps.qty), 0) as total_stock,
+        a.name as almox_name, a.type as almox_type
+      FROM products p
+      LEFT JOIN product_stocks ps ON ps.product_id = p.id
+      LEFT JOIN almoxarifados a   ON a.id = ps.almoxarifado_id
+      GROUP BY p.id, a.id
+      ORDER BY p.name, a.name
+    `).all();
     res.json({ totalTokens, totalSales, topProducts, estoque });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
