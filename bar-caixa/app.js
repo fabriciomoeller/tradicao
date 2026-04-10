@@ -962,6 +962,7 @@ const Reports = {
       .sort((a, b) => b[1].reduce((s,i)=>s+i.total,0) - a[1].reduce((s,i)=>s+i.total,0))
       .forEach(([cat, items]) => {
         const catTotal   = items.reduce((s,i)=>s+i.total, 0);
+        const catCost    = items.reduce((s,i)=>s+i.cost, 0);
         const catProfit  = items.reduce((s,i)=>s+i.profit, 0);
         salesSection += `\n### ${cat}\n\n`;
         salesSection += `| Produto | Qtd | Receita | Custo | Lucro | Margem |\n`;
@@ -969,7 +970,7 @@ const Reports = {
         items.sort((a,b)=>b.total-a.total).forEach(i => {
           salesSection += `| ${i.name} | ${i.qty} | ${fmtMD(i.total)} | ${fmtMD(i.cost)} | ${fmtMD(i.profit)} | ${pct(i.profit, i.total)} |\n`;
         });
-        salesSection += `| **Total ${cat}** | | **${fmtMD(catTotal)}** | | **${fmtMD(catProfit)}** | **${pct(catProfit, catTotal)}** |\n`;
+        salesSection += `| **Total ${cat}** | | **${fmtMD(catTotal)}** | **${fmtMD(catCost)}** | **${fmtMD(catProfit)}** | **${pct(catProfit, catTotal)}** |\n`;
       });
 
     if (!salesSection) salesSection = '\n_Nenhuma venda registrada nesta sessão._\n';
@@ -1178,8 +1179,9 @@ _Relatório gerado pelo sistema Bar Caixa — ${store}_
 const Charts = {
   _inst: null,
 
-  render() {
-    const products = Products.all().filter(p => (p.initialStock || 0) > 0 || (p.soldQty || 0) > 0);
+  render(filteredProducts) {
+    const base = filteredProducts || Products.all();
+    const products = base.filter(p => (p.initialStock || 0) > 0 || (p.soldQty || 0) > 0);
     const canvas = document.getElementById('stock-chart');
 
     if (this._inst) { this._inst.destroy(); this._inst = null; }
@@ -2285,7 +2287,7 @@ const UI = {
         <div class="chart-container"><canvas id="stock-chart"></canvas></div>
       </div>`;
 
-    Charts.render();
+    Charts.render(filtered);
 
     // Restaura foco no campo de busca se o usuário estava digitando
     const filterInput = document.getElementById('estoque-filter');
