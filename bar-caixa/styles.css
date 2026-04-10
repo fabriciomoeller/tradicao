@@ -594,6 +594,9 @@ table.data-table {
   padding: 1.5rem;
   max-width: 480px;
   width: 100%;
+}
+.modal-content.modal-wide {
+  max-width: 900px;
   max-height: 90vh;
   overflow-y: auto;
 }

@@ -15,6 +15,7 @@ try { db.exec(`ALTER TABLE products ADD COLUMN rank           INTEGER NOT NULL D
 try { db.exec(`ALTER TABLE products ADD COLUMN image          TEXT`);                          } catch {}
 try { db.exec(`ALTER TABLE products ADD COLUMN cost_price     REAL NOT NULL DEFAULT 0`);       } catch {}
 try { db.exec(`ALTER TABLE products ADD COLUMN active_almox_id TEXT`);                         } catch {}
+try { db.exec(`ALTER TABLE stock_movements ADD COLUMN unit_cost REAL NOT NULL DEFAULT 0`);     } catch {}
 
 // ── Criação de tabelas ──
 db.exec(`
@@ -151,13 +152,15 @@ const stmts = {
   deletePStock  : db.prepare('DELETE FROM product_stocks WHERE product_id = ? AND almoxarifado_id = ?'),
   allPStocks    : db.prepare('SELECT product_id as productId, almoxarifado_id as almoxarifadoId, qty FROM product_stocks'),
 
-  // stock_movements (insert-only: histórico imutável)
-  insertMovement: db.prepare(`
-    INSERT OR IGNORE INTO stock_movements
-      (id, ts, type, product_id, product_name, from_almox_id, from_almox_name, to_almox_id, to_almox_name, qty, note)
+  // stock_movements (agora mutável: suporta exclusão e edição de ts/note)
+  upsertMovement: db.prepare(`
+    INSERT OR REPLACE INTO stock_movements
+      (id, ts, type, product_id, product_name, from_almox_id, from_almox_name, to_almox_id, to_almox_name, qty, unit_cost, note)
     VALUES
-      (@id, @ts, @type, @product_id, @product_name, @from_almox_id, @from_almox_name, @to_almox_id, @to_almox_name, @qty, @note)
+      (@id, @ts, @type, @product_id, @product_name, @from_almox_id, @from_almox_name, @to_almox_id, @to_almox_name, @qty, @unit_cost, @note)
   `),
+  allMovementIds: db.prepare('SELECT id FROM stock_movements'),
+  deleteMovement: db.prepare('DELETE FROM stock_movements WHERE id = ?'),
   allMovements  : db.prepare('SELECT * FROM stock_movements ORDER BY ts DESC LIMIT 1000'),
 
   // token_sales
@@ -203,7 +206,7 @@ function readState() {
     productId: m.product_id, productName: m.product_name,
     fromAlmoxId: m.from_almox_id   || null, fromAlmoxName: m.from_almox_name || null,
     toAlmoxId:   m.to_almox_id     || null, toAlmoxName:   m.to_almox_name   || null,
-    qty: m.qty, note: m.note || ''
+    qty: m.qty, unitCost: m.unit_cost ?? 0, note: m.note || ''
   }));
 
   const products = stmts.allProducts.all().map(p => ({
@@ -303,14 +306,17 @@ const persistState = db.transaction((state) => {
     stmts.upsertPStock.run({ product_id: ps.productId, almoxarifado_id: ps.almoxarifadoId, qty: ps.qty })
   );
 
-  // ── stock_movements: insert-only (histórico imutável) ──
+  // ── stock_movements: sincronização total (suporta exclusão e edição) ──
+  const existMovIds = new Set(stmts.allMovementIds.all().map(r => r.id));
+  const incomMovIds = new Set((state.stockMovements || []).map(m => m.id));
+  existMovIds.forEach(id => { if (!incomMovIds.has(id)) stmts.deleteMovement.run(id); });
   (state.stockMovements || []).forEach(m =>
-    stmts.insertMovement.run({
+    stmts.upsertMovement.run({
       id: m.id, ts: m.ts, type: m.type,
       product_id: m.productId, product_name: m.productName,
       from_almox_id:   m.fromAlmoxId   || null, from_almox_name: m.fromAlmoxName || null,
       to_almox_id:     m.toAlmoxId     || null, to_almox_name:   m.toAlmoxName   || null,
-      qty: m.qty, note: m.note || ''
+      qty: m.qty, unit_cost: m.unitCost ?? 0, note: m.note || ''
     })
   );
 
