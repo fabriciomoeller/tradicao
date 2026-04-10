@@ -18,6 +18,7 @@ const DB = {
         pixDesc: 'BARCAIXA'
       },
       categories: [],
+      fornecedores: [],
       almoxarifados: [],
       productStocks: [],
       stockMovements: [],
@@ -233,6 +234,42 @@ const Almoxarifados = {
 };
 
 // ─────────────────────────────────────────────
+// FORNECEDORES
+// ─────────────────────────────────────────────
+const Fornecedores = {
+  all()    { return DB.get().fornecedores || []; },
+  byId(id) { return this.all().find(f => f.id === id) || null; },
+
+  save(f) {
+    DB.update(d => {
+      if (!d.fornecedores) d.fornecedores = [];
+      const idx = d.fornecedores.findIndex(x => x.id === f.id);
+      if (idx >= 0) d.fornecedores[idx] = f;
+      else d.fornecedores.push(f);
+    });
+  },
+
+  delete(id) {
+    const f = this.byId(id);
+    if (!f) return;
+    // Verifica se há movimentações vinculadas
+    const movs = (DB.get().stockMovements || []).filter(m => m.fornecedorId === id);
+    if (movs.length > 0) {
+      if (!confirm(`O fornecedor "${f.name}" tem ${movs.length} movimentação(ões) vinculada(s).\nAs movimentações serão desvinculadas. Deseja continuar?`)) return;
+      DB.update(d => {
+        (d.stockMovements || []).forEach(m => {
+          if (m.fornecedorId === id) { m.fornecedorId = null; m.fornecedorName = null; }
+        });
+      });
+    } else {
+      if (!confirm(`Excluir o fornecedor "${f.name}"?`)) return;
+    }
+    DB.update(d => { d.fornecedores = (d.fornecedores || []).filter(x => x.id !== id); });
+    UI.renderFornecedoresTab();
+  }
+};
+
+// ─────────────────────────────────────────────
 // STOCK  (controle de estoque por almoxarifado)
 // ─────────────────────────────────────────────
 const Stock = {
@@ -265,7 +302,7 @@ const Stock = {
   },
 
   // Entrada de estoque em um almoxarifado
-  entrada(productId, almoxId, qty, note = '', unitCost = 0, ts = null) {
+  entrada(productId, almoxId, qty, note = '', unitCost = 0, ts = null, fornecedorId = null, fornecedorName = null) {
     const p = Products.byId(productId);
     const a = Almoxarifados.byId(almoxId);
     if (!p || !a || qty <= 0) return false;
@@ -280,7 +317,9 @@ const Stock = {
         productId, productName: p.name,
         fromAlmoxId: null, fromAlmoxName: null,
         toAlmoxId: almoxId, toAlmoxName: a.name,
-        qty, unitCost, note
+        qty, unitCost, note,
+        fornecedorId: fornecedorId || null,
+        fornecedorName: fornecedorName || null
       });
       this._syncTotal(d, productId);
     });
@@ -935,6 +974,55 @@ const Reports = {
       }).join('');
   },
 
+  // Retorna HTML com resumo de pagamentos a fornecedores
+  _fornecedoresHTML(data) {
+    data = data || DB.get();
+    // Agrupa entradas por fornecedor
+    const byFornec = {};
+    (data.stockMovements || []).forEach(m => {
+      if (m.type !== 'entrada' || !m.fornecedorId) return;
+      if (!byFornec[m.fornecedorId]) byFornec[m.fornecedorId] = { name: m.fornecedorName || m.fornecedorId, items: {} };
+      const key = m.productName;
+      if (!byFornec[m.fornecedorId].items[key]) byFornec[m.fornecedorId].items[key] = { qty: 0, total: 0 };
+      byFornec[m.fornecedorId].items[key].qty   += m.qty;
+      byFornec[m.fornecedorId].items[key].total += m.qty * (m.unitCost || 0);
+    });
+
+    const entries = Object.entries(byFornec);
+    if (entries.length === 0) return '';
+
+    const blocks = entries.map(([fid, forn]) => {
+      const rows = Object.entries(forn.items)
+        .sort((a, b) => b[1].total - a[1].total)
+        .map(([name, v]) => `
+          <div style="display:flex;justify-content:space-between;padding:0.3rem 0 0.3rem 0.75rem;font-size:0.85rem;color:var(--muted)">
+            <span>${esc(name)} <span style="color:var(--text-light)">${v.qty} un</span></span>
+            <span style="font-weight:600;color:var(--text)">${fmt(v.total)}</span>
+          </div>`).join('');
+      const total = Object.values(forn.items).reduce((s, v) => s + v.total, 0);
+      return `
+        <div style="border-top:1px solid var(--border);padding:0.55rem 0;margin-top:0.25rem">
+          <div style="display:flex;justify-content:space-between;align-items:center">
+            <strong style="font-size:0.92rem;text-transform:uppercase;letter-spacing:0.04em">${esc(forn.name)}</strong>
+            <strong style="color:var(--danger)">${fmt(total)}</strong>
+          </div>
+          ${rows}
+        </div>`;
+    }).join('');
+
+    const totalGeral = entries.reduce((s, [, forn]) => s + Object.values(forn.items).reduce((si, v) => si + v.total, 0), 0);
+
+    return `
+      <div class="report-section">
+        <h3>Pagamentos a Fornecedores</h3>
+        ${blocks}
+        <div class="report-row" style="margin-top:0.75rem;border-top:2px solid var(--border);padding-top:0.5rem">
+          <strong>Total a pagar</strong>
+          <strong class="rr-value" style="color:var(--danger)">${fmt(totalGeral)}</strong>
+        </div>
+      </div>`;
+  },
+
   exportMarkdown() {
     const data   = DB.get();
     const s      = Reports.summary(data);
@@ -1054,6 +1142,39 @@ const Reports = {
       consigSection += `> Ambas as saídas (Venda e Devolução) reduzem a obrigação com o fornecedor.\n`;
     }
 
+    // ── Pagamentos a Fornecedores ──
+    const byFornecMD = {};
+    (data.stockMovements || []).forEach(m => {
+      if (m.type !== 'entrada' || !m.fornecedorId) return;
+      if (!byFornecMD[m.fornecedorId]) byFornecMD[m.fornecedorId] = { name: m.fornecedorName || m.fornecedorId, items: {} };
+      const key = m.productName;
+      if (!byFornecMD[m.fornecedorId].items[key]) byFornecMD[m.fornecedorId].items[key] = { qty: 0, total: 0 };
+      byFornecMD[m.fornecedorId].items[key].qty   += m.qty;
+      byFornecMD[m.fornecedorId].items[key].total += m.qty * (m.unitCost || 0);
+    });
+    const fornecEntries = Object.entries(byFornecMD);
+    let fornecSection = '';
+    if (fornecEntries.length === 0) {
+      fornecSection = '_Nenhuma entrada vinculada a fornecedor._\n';
+    } else {
+      fornecEntries.sort((a, b) => {
+        const ta = Object.values(a[1].items).reduce((s,v)=>s+v.total,0);
+        const tb = Object.values(b[1].items).reduce((s,v)=>s+v.total,0);
+        return tb - ta;
+      }).forEach(([, forn]) => {
+        const total = Object.values(forn.items).reduce((s,v)=>s+v.total,0);
+        fornecSection += `\n### ${forn.name} — ${fmtMD(total)}\n\n`;
+        fornecSection += `| Produto | Qtd (un) | Custo unit. | Total |\n`;
+        fornecSection += `|---------|--------:|------------:|------:|\n`;
+        Object.entries(forn.items).sort((a,b)=>b[1].total-a[1].total).forEach(([name, v]) => {
+          const unitCost = v.qty > 0 ? v.total / v.qty : 0;
+          fornecSection += `| ${name} | ${v.qty} | ${fmtMD(unitCost)} | ${fmtMD(v.total)} |\n`;
+        });
+      });
+      const totalFornec = fornecEntries.reduce((s,[,f])=>s+Object.values(f.items).reduce((si,v)=>si+v.total,0),0);
+      fornecSection += `\n**Total a pagar a fornecedores: ${fmtMD(totalFornec)}**\n`;
+    }
+
     // ── Custos fixos ──
     const fixedCostsList = FixedCosts.all();
     let fixedSection = `| Descrição | Qtd | Custo Unit. | Total |\n`;
@@ -1116,12 +1237,16 @@ ${stockNote}
 ${stockSection}
 ---
 
-## 5. Controle Consignado
+## 5. Pagamentos a Fornecedores
+${fornecSection}
+---
+
+## 6. Controle Consignado
 
 ${consigSection}
 ---
 
-## 6. Catálogo de Preços
+## 7. Catálogo de Preços
 
 ${catalogSection}
 ---
@@ -1258,6 +1383,7 @@ const UI = {
     this.currentTab = tab;
     if (tab === 'estoque')       this.renderEstoque();
     if (tab === 'almoxarifados') this.renderAlmoxTab();
+    if (tab === 'fornecedores')  this.renderFornecedoresTab();
     if (tab === 'caixa')         this.renderCaixa();
     if (tab === 'lucro')         this.renderLucro();
     if (tab === 'pdv')           this.renderPDVGrid();
@@ -1586,6 +1712,8 @@ const UI = {
           <h3>Vendas por produto</h3>
           ${prodRows}
         </div>` : ''}
+
+      ${Reports._fornecedoresHTML(data)}
 
       <button class="btn-danger" onclick="Reports.close()">🔒 Fechar Caixa e Gerar Relatório</button>`;
   },
@@ -2123,6 +2251,75 @@ const UI = {
     this.showCategoryList();
   },
 
+  // ── FORNECEDORES ──
+  renderFornecedoresTab() {
+    const el = document.getElementById('fornecedores-content');
+    if (!el) return;
+    const lista = Fornecedores.all();
+    const rows = lista.length === 0
+      ? `<div class="empty-state"><span class="es-icon">🤝</span>Nenhum fornecedor cadastrado.</div>`
+      : lista.map(f => {
+          const movs = (DB.get().stockMovements || []).filter(m => m.fornecedorId === f.id && m.type === 'entrada');
+          const totalQty = movs.reduce((s, m) => s + m.qty, 0);
+          const totalVal = movs.reduce((s, m) => s + m.qty * (m.unitCost || 0), 0);
+          return `
+            <div class="list-item">
+              <div class="li-info">
+                <strong>${esc(f.name)}</strong>
+                ${f.contact ? `<span class="li-sub">${esc(f.contact)}</span>` : ''}
+                ${f.note    ? `<span class="li-sub" style="color:var(--muted)">${esc(f.note)}</span>` : ''}
+                <span class="li-sub" style="margin-top:0.2rem">${totalQty} un entradas · ${fmt(totalVal)} em compras</span>
+              </div>
+              <div class="li-actions">
+                <button class="btn-icon" onclick="UI.showFornecedorForm('${f.id}')" title="Editar">✏️</button>
+                <button class="btn-icon btn-icon-danger" onclick="Fornecedores.delete('${f.id}')" title="Excluir">🗑</button>
+              </div>
+            </div>`;
+        }).join('');
+
+    el.innerHTML = `
+      <div class="section-header">
+        <h2>Fornecedores</h2>
+        <div class="section-actions">
+          <button class="btn-primary" onclick="UI.showFornecedorForm()">+ Novo Fornecedor</button>
+        </div>
+      </div>
+      ${rows}`;
+  },
+
+  showFornecedorForm(id) {
+    const f = id ? Fornecedores.byId(id) : null;
+    this.showModal(`
+      <h2>${f ? 'Editar Fornecedor' : 'Novo Fornecedor'}</h2>
+      <div class="form-group">
+        <label>Nome *</label>
+        <input id="ff-name" type="text" value="${esc(f?.name || '')}" placeholder="Ex: OmaMute">
+      </div>
+      <div class="form-group">
+        <label>Contato (telefone, e-mail, etc.)</label>
+        <input id="ff-contact" type="text" value="${esc(f?.contact || '')}" placeholder="Ex: (47) 99999-0000">
+      </div>
+      <div class="form-group">
+        <label>Observação</label>
+        <input id="ff-note" type="text" value="${esc(f?.note || '')}" placeholder="Ex: Consignado — águas e refrigerantes">
+      </div>
+      <div class="modal-actions">
+        <button class="btn-cancel" onclick="UI.closeModal()">Cancelar</button>
+        <button class="btn-primary" onclick="UI._saveFornecedor('${id || ''}')">Salvar</button>
+      </div>`);
+  },
+
+  _saveFornecedor(id) {
+    const name    = document.getElementById('ff-name').value.trim();
+    const contact = document.getElementById('ff-contact').value.trim();
+    const note    = document.getElementById('ff-note').value.trim();
+    if (!name) { this.toast('Nome é obrigatório!', 'danger'); return; }
+    Fornecedores.save({ id: id || ('forn-' + uid()), name, contact, note });
+    this.toast('Fornecedor salvo!', 'success');
+    this.closeModal();
+    this.renderFornecedoresTab();
+  },
+
   // ── ESTOQUE ──
   renderEstoque() {
     const el = document.getElementById('estoque-content');
@@ -2387,6 +2584,10 @@ const UI = {
       const ti = Almoxarifados.typeInfo(a.type);
       return `<option value="${a.id}" ${a.id === almoxId ? 'selected' : ''}>${ti.icon} ${esc(a.name)}</option>`;
     }).join('');
+    const fornOpts = [
+      `<option value="">— Sem fornecedor —</option>`,
+      ...Fornecedores.all().map(f => `<option value="${f.id}">${esc(f.name)}</option>`)
+    ].join('');
 
     this.showModal(`
       <h2>+ Entrada de Estoque</h2>
@@ -2409,12 +2610,16 @@ const UI = {
         </div>
       </div>
       <div class="form-group">
+        <label>Fornecedor (opcional)</label>
+        <select id="en-fornec">${fornOpts}</select>
+      </div>
+      <div class="form-group">
         <label>Data / Hora</label>
         <input id="en-ts" type="datetime-local" value="${nowLocal()}">
       </div>
       <div class="form-group">
         <label>Observação (opcional)</label>
-        <input id="en-note" type="text" placeholder="Ex: Entrega fornecedor 01/04">
+        <input id="en-note" type="text" placeholder="Ex: Nota OmaMute 08/04 — consignado">
       </div>
       <div class="modal-actions">
         <button class="btn-cancel" onclick="UI.closeModal()">Cancelar</button>
@@ -2435,10 +2640,12 @@ const UI = {
     const aid      = document.getElementById('en-almox').value;
     const qty      = parseInt(document.getElementById('en-qty').value);
     const unitCost = parseFloat(document.getElementById('en-cost').value) || 0;
+    const fornId   = document.getElementById('en-fornec').value || null;
     const note     = document.getElementById('en-note').value.trim();
     const ts       = localToISO(document.getElementById('en-ts').value);
+    const forn     = fornId ? Fornecedores.byId(fornId) : null;
     if (!pid || !aid || isNaN(qty) || qty <= 0) { this.toast('Preencha todos os campos!', 'danger'); return; }
-    const ok = Stock.entrada(pid, aid, qty, note, unitCost, ts);
+    const ok = Stock.entrada(pid, aid, qty, note, unitCost, ts, fornId, forn?.name || null);
     if (!ok) { this.toast('Erro ao registrar entrada!', 'danger'); return; }
     this.closeModal();
     this.toast(`Entrada registrada!`, 'success');

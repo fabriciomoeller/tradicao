@@ -150,7 +150,7 @@ Observação: A Receita tive que fazer pela saida de estoque pelos seguintes fat
 
 Observação: Ficou no estoque 4 garrafas de vinho que precisam ser devolvidas ao Oswaldo
 
-![Vinho que sobrou](./Vinho_Oswaldo.jpeg)
+![Vinho que sobrou](./image/Vinho_Oswaldo.jpeg)
 ---
 
 ## 5. Controle Consignado
@@ -213,9 +213,45 @@ Observação: Ficou no estoque 4 garrafas de vinho que precisam ser devolvidas a
 
 ---
 
-Melhorias para serem feitas:
+# Melhorias para serem feitas:
 
 Para o próximo evento podemos usar o sistema de bar com as seguintes funcionalidades:
+
+## Compra de Fichas:
+
+![CompraFichas](./image/CompraFichas.png)
+
+### Pagamento em:
+* Em dinheiro
+* PIX
+
+PIX gera qr-Code com valor a ser pago e descrição do que esta sendo pago
+
+![pix](./image/pagamentoPIX.png)
+
+## PDV de venda no balcão
+
+![PDV](./image/PDV.png)
+
+## Cadastro de Produtos
+
+![Produto](./image/Produto.png)
+
+## Cadastro de Almoxarifado
+
+![Almoxarifado](./image/Almoxarifado.png)
+
+## Controle de Estoque
+
+![Estoque](./image/Estoque.png)
+
+## Caixa
+
+![Caixa](./image/Caixa.png)
+
+
+## Lucro 
+![Lucro](./image/Lucro.png)
 
 
 _Relatório gerado pelo sistema Bar Caixa — Bar Tradição_

@@ -15,7 +15,9 @@ try { db.exec(`ALTER TABLE products ADD COLUMN rank           INTEGER NOT NULL D
 try { db.exec(`ALTER TABLE products ADD COLUMN image          TEXT`);                          } catch {}
 try { db.exec(`ALTER TABLE products ADD COLUMN cost_price     REAL NOT NULL DEFAULT 0`);       } catch {}
 try { db.exec(`ALTER TABLE products ADD COLUMN active_almox_id TEXT`);                         } catch {}
-try { db.exec(`ALTER TABLE stock_movements ADD COLUMN unit_cost REAL NOT NULL DEFAULT 0`);     } catch {}
+try { db.exec(`ALTER TABLE stock_movements ADD COLUMN unit_cost       REAL NOT NULL DEFAULT 0`); } catch {}
+try { db.exec(`ALTER TABLE stock_movements ADD COLUMN fornecedor_id   TEXT`);                    } catch {}
+try { db.exec(`ALTER TABLE stock_movements ADD COLUMN fornecedor_name TEXT`);                    } catch {}
 
 // ── Criação de tabelas ──
 db.exec(`
@@ -91,6 +93,13 @@ db.exec(`
     qty      INTEGER NOT NULL
   );
 
+  CREATE TABLE IF NOT EXISTS fornecedores (
+    id      TEXT PRIMARY KEY,
+    name    TEXT NOT NULL,
+    contact TEXT NOT NULL DEFAULT '',
+    note    TEXT NOT NULL DEFAULT ''
+  );
+
   CREATE TABLE IF NOT EXISTS cash_register_sessions (
     id        TEXT PRIMARY KEY,
     opened_at TEXT NOT NULL,
@@ -146,6 +155,12 @@ const stmts = {
   deleteAlmox   : db.prepare('DELETE FROM almoxarifados WHERE id = ?'),
   allAlmox      : db.prepare('SELECT * FROM almoxarifados ORDER BY rank, name'),
 
+  // fornecedores
+  upsertFornec  : db.prepare('INSERT OR REPLACE INTO fornecedores (id, name, contact, note) VALUES (@id, @name, @contact, @note)'),
+  allFornecIds  : db.prepare('SELECT id FROM fornecedores'),
+  deleteFornec  : db.prepare('DELETE FROM fornecedores WHERE id = ?'),
+  allFornec     : db.prepare('SELECT * FROM fornecedores ORDER BY name'),
+
   // product_stocks
   upsertPStock  : db.prepare('INSERT OR REPLACE INTO product_stocks (product_id, almoxarifado_id, qty) VALUES (@product_id, @almoxarifado_id, @qty)'),
   allPStockKeys : db.prepare('SELECT product_id, almoxarifado_id FROM product_stocks'),
@@ -155,9 +170,9 @@ const stmts = {
   // stock_movements (agora mutável: suporta exclusão e edição de ts/note)
   upsertMovement: db.prepare(`
     INSERT OR REPLACE INTO stock_movements
-      (id, ts, type, product_id, product_name, from_almox_id, from_almox_name, to_almox_id, to_almox_name, qty, unit_cost, note)
+      (id, ts, type, product_id, product_name, from_almox_id, from_almox_name, to_almox_id, to_almox_name, qty, unit_cost, note, fornecedor_id, fornecedor_name)
     VALUES
-      (@id, @ts, @type, @product_id, @product_name, @from_almox_id, @from_almox_name, @to_almox_id, @to_almox_name, @qty, @unit_cost, @note)
+      (@id, @ts, @type, @product_id, @product_name, @from_almox_id, @from_almox_name, @to_almox_id, @to_almox_name, @qty, @unit_cost, @note, @fornecedor_id, @fornecedor_name)
   `),
   allMovementIds: db.prepare('SELECT id FROM stock_movements'),
   deleteMovement: db.prepare('DELETE FROM stock_movements WHERE id = ?'),
@@ -199,6 +214,10 @@ function readState() {
     id: a.id, name: a.name, type: a.type, rank: a.rank
   }));
 
+  const fornecedores = stmts.allFornec.all().map(f => ({
+    id: f.id, name: f.name, contact: f.contact || '', note: f.note || ''
+  }));
+
   const productStocks = stmts.allPStocks.all(); // { productId, almoxarifadoId, qty }
 
   const stockMovements = stmts.allMovements.all().map(m => ({
@@ -206,7 +225,8 @@ function readState() {
     productId: m.product_id, productName: m.product_name,
     fromAlmoxId: m.from_almox_id   || null, fromAlmoxName: m.from_almox_name || null,
     toAlmoxId:   m.to_almox_id     || null, toAlmoxName:   m.to_almox_name   || null,
-    qty: m.qty, unitCost: m.unit_cost ?? 0, note: m.note || ''
+    qty: m.qty, unitCost: m.unit_cost ?? 0, note: m.note || '',
+    fornecedorId: m.fornecedor_id || null, fornecedorName: m.fornecedor_name || null
   }));
 
   const products = stmts.allProducts.all().map(p => ({
@@ -234,6 +254,7 @@ function readState() {
 
   return {
     categories,
+    fornecedores,
     settings: {
       storeName: settings.storeName || 'Bar Tradição',
       pixKey:    settings.pixKey    || '',
@@ -266,6 +287,14 @@ const persistState = db.transaction((state) => {
   if (state.categories && state.categories.length) {
     stmts.upsertSetting.run('categories_json', JSON.stringify(state.categories));
   }
+
+  // ── fornecedores ──
+  const existFornec = new Set(stmts.allFornecIds.all().map(r => r.id));
+  const incomFornec = new Set((state.fornecedores || []).map(f => f.id));
+  existFornec.forEach(id => { if (!incomFornec.has(id)) stmts.deleteFornec.run(id); });
+  (state.fornecedores || []).forEach(f =>
+    stmts.upsertFornec.run({ id: f.id, name: f.name, contact: f.contact || '', note: f.note || '' })
+  );
 
   // ── almoxarifados ──
   const existAlmox = new Set(stmts.allAlmoxIds.all().map(r => r.id));
@@ -316,7 +345,8 @@ const persistState = db.transaction((state) => {
       product_id: m.productId, product_name: m.productName,
       from_almox_id:   m.fromAlmoxId   || null, from_almox_name: m.fromAlmoxName || null,
       to_almox_id:     m.toAlmoxId     || null, to_almox_name:   m.toAlmoxName   || null,
-      qty: m.qty, unit_cost: m.unitCost ?? 0, note: m.note || ''
+      qty: m.qty, unit_cost: m.unitCost ?? 0, note: m.note || '',
+      fornecedor_id: m.fornecedorId || null, fornecedor_name: m.fornecedorName || null
     })
   );
 

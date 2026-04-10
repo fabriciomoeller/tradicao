@@ -9,7 +9,8 @@ Histórico de implementações detalhadas do projeto.
 | 09/04/2026 22:10:12 | Filtros e Ordenação na Aba Estoque | [Ver Detalhes](2026-04-09-22-10-12-filtros-e-ordenacao-aba-estoque.md) |
 | 09/04/2026 22:45:10 | Custo Total por Categoria no Relatório de Exportação | [Ver Detalhes](2026-04-09-22-45-10-custo-total-por-categoria-relatorio.md) |
 | 09/04/2026 23:17:27 | Detalhamento de Funcionalidades no Melhorias.md | [Ver Detalhes](2026-04-09-23-17-27-melhorias-detalhamento-funcionalidades.md) |
+| 10/04/2026 07:51:56 | Cadastro de Fornecedores e Pagamentos no Relatório | [Ver Detalhes](2026-04-10-07-51-56-cadastro-fornecedores-pagamentos.md) |
 
 ---
 
-_Atualizado em: 09/04/2026 23:17:27_
+_Atualizado em: 10/04/2026 07:51:56_
