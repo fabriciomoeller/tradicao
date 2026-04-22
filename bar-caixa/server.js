@@ -148,6 +148,7 @@ const stmts = {
   allProductIds : db.prepare('SELECT id FROM products'),
   deleteProduct : db.prepare('DELETE FROM products WHERE id = ?'),
   allProducts   : db.prepare('SELECT * FROM products'),
+  soldQtyByProd : db.prepare('SELECT pid, SUM(qty) AS total FROM sale_items GROUP BY pid'),
 
   // almoxarifados
   upsertAlmox   : db.prepare('INSERT OR REPLACE INTO almoxarifados (id, name, type, rank) VALUES (@id, @name, @type, @rank)'),
@@ -229,9 +230,16 @@ function readState() {
     fornecedorId: m.fornecedor_id || null, fornecedorName: m.fornecedor_name || null
   }));
 
+  // soldQty é derivado de sale_items (fonte de verdade) em vez de ler o campo
+  // denormalizado products.sold_qty — evita divergência quando sale_items é
+  // editado diretamente no banco (correções manuais de venda).
+  const soldQtyMap = {};
+  stmts.soldQtyByProd.all().forEach(r => { soldQtyMap[r.pid] = r.total; });
+
   const products = stmts.allProducts.all().map(p => ({
     id: p.id, name: p.name, price: p.price, costPrice: p.cost_price ?? 0,
-    stock: p.stock, initialStock: p.initial_stock, soldQty: p.sold_qty,
+    stock: p.stock, initialStock: p.initial_stock,
+    soldQty: soldQtyMap[p.id] ?? 0,
     category: p.category, sku: p.sku, rank: p.rank ?? 999, image: p.image || null,
     activeAlmoxId: p.active_almox_id || null
   }));
